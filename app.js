@@ -1,34 +1,19 @@
-const express = require('express');
-const cors = require('cors');
-require('dotenv').config();
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import wooRoutes from "./routes/woo.routes.js";
+import catalogRoutes from "./routes/catalog.routes.js";
 
 const app = express();
 
-// Middlewares
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Routes
-// TODO: Importar y usar rutas aquí
-// const exampleRoutes = require('./routes/exampleRoutes');
-// app.use('/api/example', exampleRoutes);
+app.use("/api/woo", wooRoutes);
+app.use("/api/catalog", catalogRoutes);
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({ message: 'Backend Gestor E-commerce API' });
+app.get("/", (req, res) => {
+  res.json({ status: "Gestor Ecommerce API OK" });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-module.exports = app;
+export default app;
