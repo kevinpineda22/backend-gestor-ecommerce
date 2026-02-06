@@ -51,6 +51,15 @@ export async function updateWooProduct(wooId, data) {
   return res.json();
 }
 
+export async function createWooProduct(data) {
+  const res = await fetch(`${API_URL}/catalog/product`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
 export async function uploadImage(file) {
   const formData = new FormData();
   formData.append("image", file);
@@ -65,4 +74,46 @@ export async function uploadImage(file) {
   }
   
   return res.json();
+}
+
+// --- CATEGORÍAS ---
+export async function fetchCategories() {
+  const res = await fetch(`${API_URL}/catalog/categories`);
+  return res.json();
+}
+
+export async function createCategory(data) {
+  const res = await fetch(`${API_URL}/catalog/categories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// --- ETIQUETAS (MARCAS) ---
+export async function fetchTags() {
+  const res = await fetch(`${API_URL}/catalog/tags`);
+  return res.json();
+}
+
+export async function createTag(data) {
+  const res = await fetch(`${API_URL}/catalog/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function deleteTag(id) {
+  const res = await fetch(`${API_URL}/catalog/tags/${id}`, {
+    method: "DELETE"
+  });
+  return res.json();
+}
+
+export async function fetchProductDetail(wooId) {
+    const res = await fetch(`${API_URL}/catalog/product/${wooId}`);
+    return res.json();
 }

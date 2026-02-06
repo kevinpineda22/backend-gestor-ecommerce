@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // --- Sanitización de variables de entorno ---
-const WC_URL = process.env.WC_URL?.trim();
+const WC_URL = process.env.WC_URL?.trim().replace(/\/$/, ""); // Quitar slash final si existe
 const WC_CONSUMER_KEY = process.env.WC_CONSUMER_KEY?.trim();
 const WC_CONSUMER_SECRET = process.env.WC_CONSUMER_SECRET?.trim();
 
@@ -26,6 +26,7 @@ const wooApi = axios.create({
   },
   headers: {
     "Content-Type": "application/json",
+    "User-Agent": "GestorEcommerce-App/1.0"
   },
   timeout: 15000,
 });
@@ -123,5 +124,120 @@ export async function getWooPricesByIds(ids) {
   }
 }
 
+// --- HELPER FETCH ALL ---
+async function fetchAllWoo(endpoint) {
+    let allData = [];
+    let page = 1;
+    let keepGoing = true;
+
+    while(keepGoing) {
+        const response = await wooApi.get(endpoint, {
+            params: { per_page: 100, page }
+        });
+        allData = allData.concat(response.data);
+        if (response.data.length < 100) {
+            keepGoing = false;
+        } else {
+            page++;
+        }
+    }
+    return allData;
+}
+
+// --- CATEGORÍAS ---
+export async function getCategories() {
+  try {
+    // Usamos fetchAllWoo para traer TODAS
+    const data = await fetchAllWoo("/products/categories");
+    return {
+      ok: true,
+      data: data.map(c => ({ id: c.id, name: c.name, parent: c.parent }))
+    };
+  } catch (error) {
+    console.error("Error fetching categories:", error.message);
+    throw error;
+  }
+}
+
+export async function createCategory(data) {
+  try {
+    const response = await wooApi.post("/products/categories", data);
+    return {
+      ok: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error("Error creating category:", error.message);
+    throw error;
+  }
+}
+
+export async function getProduct(id) {
+    try {
+        const response = await wooApi.get(`/products/${id}`);
+        return {
+            ok: true,
+            data: response.data
+        };
+    } catch (error) {
+        console.error("Error fetching product:", error.message);
+        throw error;
+    }
+}
+
+// --- ETIQUETAS (TAGS) PARA MARCAS ---
+export async function getTags() {
+  try {
+    const data = await fetchAllWoo("/products/tags");
+    return {
+      ok: true,
+      data: data.map(t => ({ id: t.id, name: t.name, slug: t.slug, count: t.count, taxonomy: 'tag' }))
+    };
+  } catch (error) {
+    console.error("Error fetching tags:", error.message);
+    throw error;
+  }
+}
+
+export async function getBrands() {
+  try {
+    const data = await fetchAllWoo("/products/brands");
+    return {
+      ok: true,
+      data: data.map(b => ({ id: b.id, name: b.name, slug: b.slug, count: b.count, taxonomy: 'brand' }))
+    };
+  } catch (error) {
+    // Si falla (por ejemplo, no existe el plugin), retornamos array vacío
+    console.warn("Endpoint /products/brands not found or failed. Ignoring brands.");
+    return { ok: true, data: [] };
+  }
+}
+
+export async function createTag(data) {
+  try {
+    // data espera: { name: "Nueva Marca" }
+    const response = await wooApi.post("/products/tags", data);
+    return {
+      ok: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error("Error creating tag:", error.message);
+    throw error;
+  }
+}
+
+export async function deleteTag(id) {
+  try {
+    const response = await wooApi.delete(`/products/tags/${id}`, { params: { force: true } });
+    return {
+      ok: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error("Error deleting tag:", error.message);
+    throw error;
+  }
+}
 
 export default wooApi;

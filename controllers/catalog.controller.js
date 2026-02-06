@@ -1,4 +1,5 @@
 import * as catalogService from "../services/catalog.service.js";
+import * as wooService from "../services/woo.service.js"; 
 
 /**
  * Listar catálogo unificado
@@ -65,13 +66,100 @@ export async function debugItem(req, res) {
  */
 export async function updateProduct(req, res) {
   const { id } = req.params;
-  const data = req.body; // { name, image_url, ... }
+  const data = req.body; // { name, image_url, categories: [id, id] }
 
   try {
     const result = await catalogService.updateProductInWoo(id, data);
     return res.json(result);
   } catch (err) {
     console.error("updateProduct error:", err);
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+// --- CATEGORIAS ---
+export async function listCategories(req, res) {
+  try {
+    const result = await wooService.getCategories();
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+export async function createCategory(req, res) {
+  try {
+    const result = await wooService.createCategory(req.body);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+// --- TAGS (MARCAS) ---
+export async function listTags(req, res) {
+  try {
+    // Buscar tanto Tags como Brands (Plugin)
+    const [tagsRes, brandsRes] = await Promise.all([
+      wooService.getTags(),
+      wooService.getBrands()
+    ]);
+
+    // Combinar resultados
+    const allItems = [
+      ...(tagsRes.ok ? tagsRes.data : []),
+      ...(brandsRes.ok ? brandsRes.data : [])
+    ];
+
+    // Deduplicar (solo si nombre coincide exactamente, preferir Brand?)
+    // Realmente, si existe una marca "Sony" y un tag "Sony", mostrarlos ambos podría confundir,
+    // pero tienen IDs diferentes. Mejor mostrarlos y dejar que el usuario elija.
+    // Ordenar por nombre
+    allItems.sort((a,b) => a.name.localeCompare(b.name));
+
+    return res.json({ ok: true, data: allItems });
+  } catch (err) {
+    console.error("❌ Error en listTags:", err.message);
+    if(err.response) console.error("Detalle API Woo:", JSON.stringify(err.response.data));
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+export async function createTag(req, res) {
+  try {
+    const result = await wooService.createTag(req.body);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+export async function deleteTag(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await wooService.deleteTag(id);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+export async function getProductDetail(req, res) {
+    try {
+        const { id } = req.params;
+        const result = await wooService.getProduct(id);
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+}
+
+export async function createNewProduct(req, res) {
+  try {
+    const result = await catalogService.createProductInWoo(req.body);
+    return res.json(result);
+  } catch (err) {
+    console.error("createProduct error:", err);
     return res.status(500).json({ ok: false, message: err.message });
   }
 }

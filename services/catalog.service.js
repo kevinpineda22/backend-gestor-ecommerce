@@ -282,10 +282,26 @@ export async function updateProductInWoo(wooId, data) {
     payload.manage_stock = true;
   }
 
-  // Manejo de Imágenes (Simple URL)
+  // Manejo de Imágenes
   if (data.image_url) {
-    console.log("📤 Enviando imagen a Woo:", data.image_url);
     payload.images = [{ src: data.image_url }];
+  }
+
+  // Manejo de Categorías (Array de IDs)
+  if (data.categories && Array.isArray(data.categories)) {
+      // Woo espera: categories: [ { id: 10 }, { id: 15 } ]
+      payload.categories = data.categories.map(id => ({ id }));
+  }
+
+  // Manejo de Etiquetas/Marcas (Array de IDs)
+  if (data.tags && Array.isArray(data.tags)) {
+      // Woo espera: tags: [ { id: 10 }, { id: 15 } ]
+      payload.tags = data.tags.map(id => ({ id }));
+  }
+
+  // Manejo de Brands (Taxonomía personalizada)
+  if (data.brands && Array.isArray(data.brands)) {
+      payload.brands = data.brands.map(id => ({ id }));
   }
 
   // 1. Update Woo
@@ -315,6 +331,123 @@ export async function updateProductInWoo(wooId, data) {
   }
 
   return { ok: true };
+}
+
+export async function createProductInWoo(data) {
+  // data: { name, sku, description, price, image_url, categories, tags, brands }
+  try {
+      // 🚀 SIESA PRE-FETCH: Buscar precio/stock real en PV001 para que nazca vivo
+      let initialStock = 0;
+      let initialPrice = data.price; // Fallback al del formulario
+
+      try {
+          // Hardcodeado PV001 / P01 por solicitud expresa para MVP
+          const SEDE_INIT = "PV001";
+          const LISTA_INIT = "P01";
+          
+          console.log(`🔌 Pre-cargando Siesa para ${data.sku} en ${SEDE_INIT}...`);
+          
+          const [liveStockVal, livePriceVal] = await Promise.all([
+             getLiveStockForItem({ item: data.sku, sede: SEDE_INIT }),
+             getLivePriceForItem({ item: data.sku, sedeLista: LISTA_INIT })
+          ]);
+
+          // Si Siesa responde, usamos esos valores
+          // FIX: Siesa devuelve Objetos, extraer valores numéricos
+          if (liveStockVal && typeof liveStockVal.disponible === 'number') {
+             initialStock = liveStockVal.disponible;
+          } else if (liveStockVal && typeof liveStockVal.existencia === 'number') {
+             initialStock = liveStockVal.existencia;
+          }
+
+          if (livePriceVal && typeof livePriceVal.precio === 'number') {
+             initialPrice = livePriceVal.precio;
+          }
+
+          console.log(`✅ Siesa respondió: StockObj=${JSON.stringify(liveStockVal)}, PriceObj=${JSON.stringify(livePriceVal)}`);
+          console.log(`👉 Usando: Stock=${initialStock}, Price=${initialPrice}`);
+
+      } catch (siesaErr) {
+          console.warn("⚠️ Falló lectura Siesa pre-creación, usando defaults:", siesaErr.message);
+      }
+
+      const payload = {
+          name: data.name,
+          type: 'simple',
+          status: 'publish', // Publicar por defecto
+          catalog_visibility: 'visible', // Forzar visibilidad
+          sku: data.sku, 
+          description: data.description || '',
+          short_description: data.short_description || '',
+          manage_stock: true,
+          // Si el stock es 0, Woo lo oculta por defecto en muchas configs.
+          stock_quantity: initialStock, 
+          regular_price: initialPrice ? String(initialPrice) : undefined
+      };
+
+      // Imagen
+      if (data.image_url) {
+          payload.images = [{ src: data.image_url }];
+      }
+
+      // Categorías
+      if (data.categories && Array.isArray(data.categories)) {
+          payload.categories = data.categories.map(id => ({ id }));
+      }
+
+      // Tags estándar
+      if (data.tags && Array.isArray(data.tags)) {
+        payload.tags = data.tags.map(id => ({ id }));
+      }
+      
+      // Brands (si el plugin YITH Brands usa taxonomía)
+      // Nota: A veces Woo requiere que vengan en atributos o en un campo especial, pero intentamos taxonomía
+      // Si marcas son 'pa_brand' o similar, ajuste necesario. Aquí asumimos la estructura estándar
+      if (data.brands && Array.isArray(data.brands)) {
+           // Algunos plugins usan 'brands' como campo top-level
+           payload.brands = data.brands.map(id => ({ id }));
+      }
+
+      const response = await wooApi.post("/products", payload);
+      const newWooId = response.data.id;
+      
+      console.log(`✅ Producto creado en Woo: ${newWooId} - ${response.data.name}`);
+      
+      // REGISTRAR EN SUPABASE PARA VINCULARLO INMEDIATAMENTE
+      // Buscamos si ya existe registro por SKU (muy probable que si, viniendo de Siesa)
+      const { data: existing } = await supabase.from("ecommerce_products").select("*").eq("item", data.sku).single();
+      
+      if (existing) {
+          // Actualizar registro existente
+          await supabase.from("ecommerce_products").update({
+              woo_product_id: newWooId,
+              woo_status: 'publish',
+              ecommerce_active: true,
+              last_sync: new Date(),
+              image_url: data.image_url || existing.image_url
+          }).eq("item", data.sku);
+      } else {
+          // Crear registro nuevo (Raro si venía del listado del gestor, pero posible)
+          await supabase.from("ecommerce_products").insert({
+              item: data.sku,
+              woo_product_id: newWooId,
+              woo_status: 'publish',
+              ecommerce_active: true,
+              last_sync: new Date(),
+              image_url: data.image_url
+          });
+      }
+
+      return {
+          ok: true,
+          data: response.data
+      };
+
+  } catch (error) {
+      console.error("Error creando producto en Woo:", error.response?.data || error.message);
+      // Si el error es "SKU ya existe", podríamos intentar recuperar ese ID y vincularlo
+      throw error;
+  }
 }
 
 export async function toggleCatalogItem({ item, active }) {

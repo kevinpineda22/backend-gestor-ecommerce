@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import LiveComparison from './components/LiveComparison';
-import CatalogManager from './components/CatalogManager';
+import CatalogManager from './CatalogManager';
 import './GestorEcommerce.css';
 
 const GestorEcommerce = () => {
