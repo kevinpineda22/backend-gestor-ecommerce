@@ -14,6 +14,9 @@ export default function CatalogManager() {
   const [pageSize] = useState(20);
   const [dataError, setDataError] = useState(null);
 
+  // Search Logic
+  const [exactSearchTriggered, setExactSearchTriggered] = useState(false);
+
   // Edit State
   const [editingItem, setEditingItem] = useState(null); 
   const [savingEdit, setSavingEdit] = useState(false);
@@ -139,13 +142,17 @@ export default function CatalogManager() {
                 const wooTags = res.data.tags ? res.data.tags.map(t => String(t.id)) : [];
                 const wooBrands = res.data.brands ? res.data.brands.map(b => String(b.id)) : [];
                 
+                // Mapeo de imagenes (Array de URLs)
+                const wooImages = res.data.images ? res.data.images.map(img => img.src) : [];
+
                 setEditingItem(prev => ({
                     ...prev,
                     categories: wooCats,
                     tags: wooTags,
                     brands: wooBrands,
                     name: res.data.name || prev.name,
-                    image_url: res.data.images?.[0]?.src || prev.image_url,
+                    image_url: res.data.images?.[0]?.src || prev.image_url, // Mantenemos compatibilidad legacy
+                    images: wooImages.length > 0 ? wooImages : (prev.image_url ? [prev.image_url] : []), // Nuevo Array
                     ecommerce_active: res.data.status === 'publish'
                 }));
             }
@@ -160,19 +167,22 @@ export default function CatalogManager() {
       try {
         let res;
         
+        // Preparar payload de imágenes
+        // Prioridad: modifiedItem.images (array) > modifiedItem.image_url (string legacy)
+        const finalImages = modifiedItem.images && modifiedItem.images.length > 0 
+            ? modifiedItem.images 
+            : (modifiedItem.image_url ? [modifiedItem.image_url] : []);
+
         if (modifiedItem.isNew) {
             // CREAR
-            // Intentar enviar el stock actual si viene del ERP (suponiendo que 'existencia' u otro campo venga en filteredData)
-            // Revisamos 'modifiedItem' a ver si tiene info de stock. Normalmente 'row' trae la info de Siesa.
-            // En getCatalog (backend) no estamos devolviendo 'existencia' explícitamente en el objeto final.
-            // Por ahora mandamos 0, pero si tuviéramos el dato lo pasaríamos.
             res = await createWooProduct({
                 name: modifiedItem.name,
-                sku: modifiedItem.item, // El SKU es el item del ERP
-                description: modifiedItem.descripcion, // Descripcion larga default
-                price: modifiedItem.precio_1 || 0, // Si viniera del ERP
-                stock_quantity: modifiedItem.existencia || 0, // Pasamos existencia si existe
-                image_url: modifiedItem.image_url,
+                sku: modifiedItem.item, 
+                description: modifiedItem.descripcion, 
+                price: modifiedItem.precio_1 || 0,
+                stock_quantity: modifiedItem.existencia || 0,
+                images: finalImages, // Enviamos Array
+                // image_url: ... (Ya no es necesario si el backend soporta 'images')
                 categories: modifiedItem.categories,
                 tags: modifiedItem.tags,
                 brands: modifiedItem.brands
@@ -181,7 +191,7 @@ export default function CatalogManager() {
             // ACTUALIZAR
             res = await updateWooProduct(modifiedItem.woo_product_id, {
                 name: modifiedItem.name, 
-                image_url: modifiedItem.image_url,
+                images: finalImages, // Enviamos Array
                 categories: modifiedItem.categories, 
                 tags: modifiedItem.tags,
                 brands: modifiedItem.brands 
@@ -190,10 +200,36 @@ export default function CatalogManager() {
 
         if (res.ok) {
             // Actualizar tabla localmente para reflejar cambios (especialmente si se creó)
-            // Lo ideal sería recargar todo el catálogo, pero podemos hacer un patch optimista o recargar page actual
             alert(modifiedItem.isNew ? "Producto CREADO correctamente en WooCommerce" : "Producto ACTUALIZADO correctamente");
+            
+            // ACTUALIZACION OPTIMISTA LOCAL
+            setData(prevData => prevData.map(d => {
+                // Imagen principal para la tabla (la primera del array)
+                const mainImage = finalImages.length > 0 ? finalImages[0] : "";
+
+                // Caso: CREACIÓN (Buscamos por item/SKU)
+                if (modifiedItem.isNew && d.item === modifiedItem.item) {
+                    return {
+                        ...d,
+                        exists_in_woo: true,
+                        woo_product_id: res.data?.id, 
+                        ecommerce_active: true,
+                        ecommerce_name: modifiedItem.name,
+                        image_url: mainImage
+                    };
+                }
+                // Caso: EDICIÓN (Buscamos por Woo ID)
+                if (!modifiedItem.isNew && d.woo_product_id === modifiedItem.woo_product_id) {
+                    return {
+                         ...d,
+                         ecommerce_name: modifiedItem.name,
+                         image_url: mainImage
+                    };
+                }
+                return d;
+            }));
+
             setEditingItem(null);
-            loadCatalog(); // Recargar para que aparezca "Viculado" y con ID
         } else {
             alert("Error al guardar: " + res.message);
         }
@@ -267,7 +303,16 @@ export default function CatalogManager() {
 
   // --- FILTRADO Y PAGINACIÓN ---
   const filteredData = data.filter(row => {
-    const matchSearch = row.descripcion?.toLowerCase().includes(search.toLowerCase()) || row.item?.includes(search);
+    let matchSearch = false;
+    
+    // Si se presionó ENTER y hay texto, buscar EXACTAMENTE por Item/SKU
+    if (exactSearchTriggered && search.trim() !== "") {
+        matchSearch = String(row.item).trim() === search.trim();
+    } else {
+        // Busqueda parcial (comportamiento default)
+        matchSearch = row.descripcion?.toLowerCase().includes(search.toLowerCase()) || row.item?.includes(search);
+    }
+    
     if (!matchSearch) return false;
     if (filterType === 'active') return row.ecommerce_active;
     if (filterType === 'unlinked') return !row.exists_in_woo;
@@ -298,7 +343,17 @@ export default function CatalogManager() {
 
           <input 
             className="ge-input" type="text" placeholder="Buscar..." 
-            value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            value={search} 
+            onChange={(e) => { 
+                setSearch(e.target.value); 
+                setPage(1); 
+                setExactSearchTriggered(false); // Al escribir, volver a modo "sugerencias"
+            }}
+            onKeyDown={(e) => {
+                if(e.key === 'Enter') {
+                    setExactSearchTriggered(true); // Al dar Enter, activar modo "exacto"
+                }
+            }}
             style={{width: '250px'}}
           />
         </div>
@@ -346,7 +401,7 @@ export default function CatalogManager() {
                       <div style={{fontWeight: 600, color: '#111827'}}>{row.item}</div>
                       {!row.exists_in_woo && <div style={{fontSize:'0.75rem', color:'#d97706', fontWeight: 600}}>⚠️ Sin vincular</div>}
                     </td>
-                    <td><div style={{fontWeight: 500}}>{row.descripcion}</div></td>
+                    <td><div style={{fontWeight: 500}}>{row.ecommerce_name || row.descripcion}</div></td>
                     <td>
                       <div style={{fontSize: '0.85rem', color: '#6b7280'}}>
                         {row.subgrupo} <br/> <span style={{color: '#9ca3af'}}>{row.marca}</span>

@@ -24,6 +24,9 @@ export default function ProductEditModal({
   const [newTagName, setNewTagName] = useState("");
   const [savingTag, setSavingTag] = useState(false);
   const [isSaving, setIsSaving] = useState(false); // Para el botón de guardar global
+  
+  // Estado para URL Manual (Input controlado)
+  const [manualUrl, setManualUrl] = useState("");
 
   // Inicializar estado local al abrir
   useEffect(() => {
@@ -33,7 +36,11 @@ export default function ProductEditModal({
         // Asegurar arrays
         categories: product.categories || [],
         tags: product.tags || [],
-        brands: product.brands || []
+        brands: product.brands || [],
+        // Inicializar images (Soporte múltiple)
+        images: product.images && product.images.length > 0 
+            ? product.images 
+            : (product.image_url ? [product.image_url] : [])
       });
       // Resetear vista
       setActiveTab('general');
@@ -47,8 +54,22 @@ export default function ProductEditModal({
   const subGroupCats = categories.filter(c => c.parent !== 0).sort((a,b) => a.name.localeCompare(b.name));
 
   const handleInternalSave = async () => {
+      // 1. Si hay una URL escrita en el input manual y no se ha agregado, agregarla ahora.
+      let itemToSave = { ...localItem };
+      
+      if (manualUrl && manualUrl.trim() !== "") {
+          const urlToAdd = manualUrl.trim();
+          // Evitar duplicados si ya está
+          const currentImages = itemToSave.images || [];
+          if (!currentImages.includes(urlToAdd)) {
+              itemToSave.images = [...currentImages, urlToAdd];
+          }
+           // Limpiar input (opcional, pero buena práctica por si falla el save)
+           setManualUrl("");
+      }
+
       setIsSaving(true);
-      await onSave(localItem);
+      await onSave(itemToSave);
       setIsSaving(false);
   };
 
@@ -145,50 +166,118 @@ export default function ProductEditModal({
                         {/* Columna Derecha: Imagen */}
                         <div>
                              <div className="cm-form-group">
-                                <label className="cm-label">Imagen del Producto</label>
+                                <label className="cm-label">Galería de Imágenes ({localItem.images?.length || 0})</label>
+                                
                                 <div 
                                     className="cm-upload-box large"
+                                    style={{ height: '100px', minHeight: '100px', padding: '10px', borderStyle: 'dashed' }}
                                     onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.backgroundColor = '#e2e8f0'; }}
                                     onDragLeave={(e) => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
                                     onDrop={(e) => {
                                         e.preventDefault();
                                         e.currentTarget.style.backgroundColor = '#f8fafc';
-                                        onUploadImage(e.dataTransfer.files, (url) => setLocalItem({...localItem, image_url: url}));
+                                        onUploadImage(e.dataTransfer.files, (url) => {
+                                            setLocalItem(prev => ({...prev, images: [...(prev.images || []), url] }));
+                                        });
                                     }}     
                                     onClick={() => document.getElementById('file-upload-modal').click()}  
                                 >
-                                    {localItem.image_url ? (
-                                        <div style={{position: 'relative', width: '100%', height: '100%', display:'flex', justifyContent:'center'}}>
-                                            <img src={localItem.image_url} alt="Preview" className="cm-upload-preview-large" />
-                                            <div className="cm-upload-overlay">🔄 Cambiar Imagen</div>
-                                        </div>
-                                    ) : (
-                                        <div style={{textAlign: 'center', padding: '40px'}}>
-                                            <div style={{fontSize: '48px', marginBottom: '16px'}}>📷</div>
-                                            <p style={{margin: 0, fontWeight: 600, color: '#475569'}}>Arrastra una imagen aquí</p>
-                                            <p style={{fontSize: '0.8rem', color: '#94a3b8'}}>o haz clic para buscar</p>
-                                        </div>
-                                    )}
+                                    <div style={{textAlign: 'center', color: '#64748b'}}>
+                                        <div style={{fontSize: '24px'}}>📷</div>
+                                        <p style={{margin: '4px 0', fontSize: '0.9rem'}}>Click o Arrastra para AGREGAR</p>
+                                    </div>
                                     <input 
                                         id="file-upload-modal"
                                         type="file" 
                                         accept="image/*" 
                                         style={{display: 'none'}} 
-                                        onChange={(e) => onUploadImage(e.target.files, (url) => setLocalItem({...localItem, image_url: url}))}
+                                        onChange={(e) => {
+                                            if(e.target.files && e.target.files.length > 0) {
+                                                onUploadImage(e.target.files, (url) => {
+                                                    setLocalItem(prev => ({...prev, images: [...(prev.images || []), url] }));
+                                                    // Reset input para permitir subir misma imagen si se borró
+                                                    e.target.value = null; 
+                                                });
+                                            }
+                                        }}
                                         onClick={(e) => e.stopPropagation()} 
                                     />
                                 </div>
                                 
+                                {/* Tira de Miniaturas */}
+                                {localItem.images && localItem.images.length > 0 && (
+                                    <div style={{
+                                        display: 'flex', gap: '8px', flexWrap: 'wrap', 
+                                        marginTop: '12px', padding: '8px', 
+                                        background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0'
+                                    }}>
+                                        {localItem.images.map((img, idx) => (
+                                            <div key={idx} style={{position: 'relative', width: '70px', height: '70px', borderRadius: '4px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)'}}>
+                                                <img src={img} alt={`img-${idx}`} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                                                <button 
+                                                    style={{
+                                                        position: 'absolute', top: 0, right: 0, 
+                                                        background: 'rgba(239, 68, 68, 0.9)', color: 'white', 
+                                                        border: 'none', cursor: 'pointer', width: '20px', height: '20px',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px',
+                                                        lineHeight: '1px'
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setLocalItem(prev => ({
+                                                            ...prev, 
+                                                            images: prev.images.filter((_, i) => i !== idx)
+                                                        }));
+                                                    }}
+                                                    title="Eliminar"
+                                                >
+                                                    ×
+                                                </button>
+                                                {idx === 0 && (
+                                                    <span style={{
+                                                        position: 'absolute', bottom: 0, left: 0, right: 0, 
+                                                        background: 'rgba(37, 99, 235, 0.85)', color: 'white', 
+                                                        fontSize: '9px', textAlign: 'center', padding: '2px 0'
+                                                    }}>
+                                                        PORTADA
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div style={{marginTop: '10px'}}>
-                                    <label className="cm-label-small">URL de la imagen:</label>
-                                    <input 
-                                        type="text" 
-                                        className="cm-input"
-                                        value={localItem.image_url || ''} 
-                                        onChange={(e) => setLocalItem({...localItem, image_url: e.target.value})}
-                                        placeholder="https://..."
-                                        style={{fontSize: '0.8rem', color: '#64748b'}}
-                                    />
+                                    <label className="cm-label-small">Agregar URL manual:</label>
+                                    <div style={{display: 'flex', gap: '8px'}}>
+                                        <input 
+                                            type="text" 
+                                            className="cm-input"
+                                            value={manualUrl}
+                                            onChange={(e) => setManualUrl(e.target.value)}
+                                            placeholder="Pegar https://... y Enter"
+                                            style={{fontSize: '0.8rem', color: '#64748b', flex: 1}}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && manualUrl) {
+                                                    e.preventDefault();
+                                                    setLocalItem(prev => ({...prev, images: [...(prev.images || []), manualUrl] }));
+                                                    setManualUrl("");
+                                                }
+                                            }}
+                                        />
+                                        <button 
+                                            className="cm-btn cm-btn-secondary small"
+                                            onClick={() => {
+                                                if(manualUrl) {
+                                                    setLocalItem(prev => ({...prev, images: [...(prev.images || []), manualUrl] }));
+                                                    setManualUrl("");
+                                                }
+                                            }}
+                                            type="button"
+                                        >
+                                            +
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

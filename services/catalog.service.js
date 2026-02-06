@@ -282,9 +282,15 @@ export async function updateProductInWoo(wooId, data) {
     payload.manage_stock = true;
   }
 
-  // Manejo de Imágenes
-  if (data.image_url) {
-    payload.images = [{ src: data.image_url }];
+  // Manejo de Imágenes (Múltiples)
+  if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+    // FIX: Filtrar URLs vacías para evitar "woocommerce_product_image_upload_error"
+    const validImages = data.images.filter(url => url && typeof url === 'string' && url.trim().length > 0);
+    if (validImages.length > 0) {
+       payload.images = validImages.map(url => ({ src: url.trim() }));
+    }
+  } else if (data.image_url && typeof data.image_url === 'string' && data.image_url.trim().length > 0) {
+    payload.images = [{ src: data.image_url.trim() }];
   }
 
   // Manejo de Categorías (Array de IDs)
@@ -317,7 +323,8 @@ export async function updateProductInWoo(wooId, data) {
 
   // 2. Update Local Mirror
   const updateLocal = {};
-  if (data.image_url) updateLocal.image_url = data.image_url;
+  if (data.images && data.images.length > 0) updateLocal.image_url = data.images[0];
+  else if (data.image_url) updateLocal.image_url = data.image_url;
   if (data.name) updateLocal.woo_name = data.name; // Guardamos el nombre en local
   
   if (typeof data.active === 'boolean') {
@@ -386,8 +393,14 @@ export async function createProductInWoo(data) {
       };
 
       // Imagen
-      if (data.image_url) {
-          payload.images = [{ src: data.image_url }];
+      if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+          // FIX: Filtrar URLs vacías
+          const validImages = data.images.filter(url => url && typeof url === 'string' && url.trim().length > 0);
+          if (validImages.length > 0) {
+              payload.images = validImages.map(url => ({ src: url.trim() }));
+          }
+      } else if (data.image_url && typeof data.image_url === 'string' && data.image_url.trim().length > 0) {
+          payload.images = [{ src: data.image_url.trim() }];
       }
 
       // Categorías
