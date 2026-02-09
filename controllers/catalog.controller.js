@@ -1,6 +1,42 @@
 import * as catalogService from "../services/catalog.service.js";
 import * as wooService from "../services/woo.service.js"; 
 
+
+export async function getDashboardStats(req, res) {
+  try {
+      // 1. Stats locales (Catalog)
+      const catalogStats = await catalogService.getCatalogStats();
+
+      // 2. Stats remotos (Woo Sales) - Fallback a null si falla para no bloquear dashboard
+      const salesStats = await wooService.getSalesStats("month");
+
+      return res.json({
+          ok: true,
+          catalog: catalogStats,
+          sales: salesStats || { total_sales: 0, total_orders: 0 }
+      });
+
+  } catch (err) {
+      console.error("Dashboard Stats Error:", err);
+      return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
+export async function getWooDetailsBatch(req, res) {
+  const { ids } = req.body;
+  
+  if (!ids || !Array.isArray(ids)) {
+     return res.status(400).json({ ok: false, message: "ids array required" });
+  }
+
+  try {
+     const data = await wooService.getWooDetailsByIds(ids);
+     return res.json({ ok: true, data });
+  } catch (err) {
+     return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
 /**
  * Listar catálogo unificado
  */

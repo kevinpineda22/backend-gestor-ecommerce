@@ -124,6 +124,40 @@ export async function getWooPricesByIds(ids) {
   }
 }
 
+
+export async function getWooDetailsByIds(ids) {
+  // Eliminar duplicados y nulos/undefined
+  const validIds = [...new Set(ids.filter((id) => id))];
+
+  if (validIds.length === 0) return {};
+
+  try {
+    // Nota: 'include' acepta IDs separados por coma.
+    // Pedimos solo lo necesario: id, categories, tags, brands (si las hubiera en attributes)
+    const response = await wooApi.get("/products", {
+      params: {
+        include: validIds.join(","),
+        per_page: 100, // Máximo permitido
+        _fields: "id,categories,tags,attributes" // Limitamos respuesta
+      },
+    });
+
+    const dataMap = {};
+    response.data.forEach((p) => {
+      dataMap[p.id] = {
+         categories: p.categories || [],
+         tags: p.tags || []
+         // Si brands viene en attributes, habría que procesarlo aqui, pero por ahora categories/tags es lo pedido
+      };
+    });
+
+    return dataMap;
+  } catch (error) {
+    console.error("⚠️ Error batch Woo details:", error.message);
+    return {};
+  }
+}
+
 // --- HELPER FETCH ALL ---
 async function fetchAllWoo(endpoint) {
     let allData = [];
@@ -237,6 +271,35 @@ export async function deleteTag(id) {
   } catch (error) {
     console.error("Error deleting tag:", error.message);
     throw error;
+  }
+}
+
+/**
+ * Obtener reporte de ventas (Mes actual)
+ */
+export async function getSalesStats(period = "month") {
+  try {
+    const response = await wooApi.get("/reports/sales", {
+      params: { period },
+    });
+    // La API devuelve un array de objetos (uno por reporte). 
+    // Si pedimos 'month', suele venir 1 objeto con el acumulado del mes, o array de dias si pedimos rango.
+    // woocommerce /reports/sales devuelve array.
+    if (response.data && response.data.length > 0) {
+        // Tomamos el último (o el sumatorio)
+        const report = response.data[0]; 
+        return {
+            total_sales: report.total_sales,
+            net_sales: report.net_sales,
+            average_sales: report.average_sales,
+            total_orders: report.total_orders,
+            total_items: report.total_items,
+        };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching sales reports:", error.message);
+    return null; 
   }
 }
 

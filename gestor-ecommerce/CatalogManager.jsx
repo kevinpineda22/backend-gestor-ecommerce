@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, createCategory, fetchTags, createTag, deleteTag, fetchProductDetail } from "./services";
+import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, createCategory, fetchTags, createTag, deleteTag, fetchProductDetail, fetchWooDetailsBatch } from "./services";
 import "./GestorEcommerce.css";
 import "./components/CatalogManager.css";
 import ProductEditModal from "./components/ProductEditModal";
@@ -16,6 +16,9 @@ export default function CatalogManager() {
 
   // Search Logic
   const [exactSearchTriggered, setExactSearchTriggered] = useState(false);
+
+  // Woo Enrich Data (Map: woo_id => { categories:[], tags:[] })
+  const [wooRichData, setWooRichData] = useState({});
 
   // Edit State
   const [editingItem, setEditingItem] = useState(null); 
@@ -323,6 +326,16 @@ export default function CatalogManager() {
   const totalPages = Math.ceil(filteredData.length / pageSize);
   const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
 
+  // --- EFECTO ENRIQUECEDOR: (DESHABILITADO POR CAMBIO A CACHE DB) ---
+  /*
+  useEffect(() => {
+     if (paginatedData.length === 0) return;
+     const idsToFetch = paginatedData.filter(row => row.exists_in_woo && row.woo_product_id && !wooRichData[row.woo_product_id]).map(row => row.woo_product_id);
+     if (idsToFetch.length === 0) return; 
+     fetchWooDetailsBatch(idsToFetch).then(res => { if(res.ok && res.data) setWooRichData(prev => ({ ...prev, ...res.data })); });
+  }, [paginatedData, wooRichData]); 
+  */
+
   // --- RENDER ---
   return (
     <div>
@@ -403,9 +416,23 @@ export default function CatalogManager() {
                     </td>
                     <td><div style={{fontWeight: 500}}>{row.ecommerce_name || row.descripcion}</div></td>
                     <td>
-                      <div style={{fontSize: '0.85rem', color: '#6b7280'}}>
-                        {row.subgrupo} <br/> <span style={{color: '#9ca3af'}}>{row.marca}</span>
-                      </div>
+                      {/* Lógica Display: Preferir Cache DB Woo > Siesa */}
+                      {row.exists_in_woo && (row.woo_category_names || row.woo_tag_names) ? (
+                          <div style={{fontSize: '0.85rem', color: '#4f46e5'}}>
+                              {/* Categorías Woo desde Cache */}
+                              {row.woo_category_names || 'Sin categoría'}
+                              <br/>
+                              {/* Tags Woo desde Cache */}
+                              <span style={{color: '#9ca3af', fontSize: '0.75rem'}}>
+                                  {row.woo_tag_names}
+                              </span>
+                          </div>
+                      ) : (
+                          <div style={{fontSize: '0.85rem', color: '#6b7280'}}>
+                            {/* Fallback a Siesa */}
+                            {row.subgrupo} <br/> <span style={{color: '#9ca3af'}}>{row.marca}</span>
+                          </div>
+                      )}
                     </td>
                     <td className="text-center">
                        {row.ecommerce_active ? <span className="ge-badge status-OK">Publicado</span> : <span className="ge-badge status-NO_EXISTE_WOO">Inactivo</span>}

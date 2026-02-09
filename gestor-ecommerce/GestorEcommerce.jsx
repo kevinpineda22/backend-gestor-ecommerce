@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import LiveComparison from './components/LiveComparison';
+import DashboardGestorEcommerce from './components/DashboardGestorEcommerce';
 import CatalogManager from './CatalogManager';
 import './GestorEcommerce.css';
 
@@ -9,7 +10,7 @@ const GestorEcommerce = () => {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <div className="ge-card" style={{padding: '40px', textAlign: 'center'}}>Dashboard en construcción...</div>;
+        return <DashboardGestorEcommerce setActiveTab={setActiveTab} />;
       case 'catalog':
         return <CatalogManager />;
       case 'audit':

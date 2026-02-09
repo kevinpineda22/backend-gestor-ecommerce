@@ -4,6 +4,29 @@ import wooApi from "./woo.service.js";
 import { getLivePriceForItem } from "./siesa/siesa.prices.js";
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
 
+export async function getCatalogStats() {
+    // Ejecutar conteos en paralelo
+    const [
+        { count: totalCount },
+        { count: activeCount },
+        { count: draftCount },
+        { count: noImageCount } // Productos sin imagen (calidad)
+    ] = await Promise.all([
+        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }),
+        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).eq("ecommerce_active", true),
+        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).eq("woo_status", "draft"),
+        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).is("image_url", null)
+    ]);
+
+    return {
+        total_products: totalCount || 0,
+        active_products: activeCount || 0,
+        draft_products: draftCount || 0,
+        missing_images: noImageCount || 0
+    };
+}
+
+
 export async function debugSkuStatus(sku) {
   const report = {
     checked_sku: sku,
@@ -204,8 +227,8 @@ export async function getCatalog() {
     console.log(`✅ SIESA cargados: ${siesaItems.length}`);
 
     // 2. Mapeo ecommerce (TODOS)
-    // Agregamos 'woo_name' a la selección
-    const ecommerceMap = await fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, image_url, woo_name");
+    // Agregamos 'woo_name', 'woo_category_names', 'woo_tag_names' a la selección
+    const ecommerceMap = await fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, image_url, woo_name, woo_category_names, woo_tag_names");
     console.log(`✅ Ecommerce Map cargados: ${ecommerceMap.length}`);
 
     // 3. Crear mapa INTELIGENTE
@@ -249,6 +272,9 @@ export async function getCatalog() {
         woo_status: ecommerce?.woo_status || null,
         ecommerce_active: ecommerce?.ecommerce_active || false,
         image_url: ecommerce?.image_url || null,
+        // Campos Cache Directos para visualización instantánea
+        woo_category_names: ecommerce?.woo_category_names || null,
+        woo_tag_names: ecommerce?.woo_tag_names || null
       };
     });
     
@@ -311,8 +337,10 @@ export async function updateProductInWoo(wooId, data) {
   }
 
   // 1. Update Woo
+  let wooResponse;
   try {
-    await wooApi.put(`/products/${wooId}`, payload);
+    const response = await wooApi.put(`/products/${wooId}`, payload);
+    wooResponse = response.data;
   } catch (error) {
     if (error.response && error.response.data) {
       console.error("WooCommerce API Error:", JSON.stringify(error.response.data, null, 2));
@@ -325,7 +353,17 @@ export async function updateProductInWoo(wooId, data) {
   const updateLocal = {};
   if (data.images && data.images.length > 0) updateLocal.image_url = data.images[0];
   else if (data.image_url) updateLocal.image_url = data.image_url;
-  if (data.name) updateLocal.woo_name = data.name; // Guardamos el nombre en local
+  if (data.name) updateLocal.woo_name = data.name; 
+  
+  // FIX: Guardar categorías y tags en local desde la RESPUESTA de Woo
+  if (wooResponse) {
+      if (wooResponse.categories && Array.isArray(wooResponse.categories)) {
+          updateLocal.woo_category_names = wooResponse.categories.map(c => c.name).join(", ");
+      }
+      if (wooResponse.tags && Array.isArray(wooResponse.tags)) {
+          updateLocal.woo_tag_names = wooResponse.tags.map(t => t.name).join(", ");
+      }
+  }
   
   if (typeof data.active === 'boolean') {
     updateLocal.ecommerce_active = data.active;
@@ -430,6 +468,16 @@ export async function createProductInWoo(data) {
       // Buscamos si ya existe registro por SKU (muy probable que si, viniendo de Siesa)
       const { data: existing } = await supabase.from("ecommerce_products").select("*").eq("item", data.sku).single();
       
+      // Preparar strings de categorías/tags para cache local
+      let catNames = null;
+      let tagNames = null;
+      if (response.data.categories && Array.isArray(response.data.categories)) {
+          catNames = response.data.categories.map(c => c.name).join(", ");
+      }
+      if (response.data.tags && Array.isArray(response.data.tags)) {
+          tagNames = response.data.tags.map(t => t.name).join(", ");
+      }
+
       if (existing) {
           // Actualizar registro existente
           await supabase.from("ecommerce_products").update({
@@ -437,7 +485,9 @@ export async function createProductInWoo(data) {
               woo_status: 'publish',
               ecommerce_active: true,
               last_sync: new Date(),
-              image_url: data.image_url || existing.image_url
+              image_url: data.image_url || existing.image_url,
+              woo_category_names: catNames,
+              woo_tag_names: tagNames
           }).eq("item", data.sku);
       } else {
           // Crear registro nuevo (Raro si venía del listado del gestor, pero posible)
@@ -447,7 +497,9 @@ export async function createProductInWoo(data) {
               woo_status: 'publish',
               ecommerce_active: true,
               last_sync: new Date(),
-              image_url: data.image_url
+              image_url: data.image_url,
+              woo_category_names: catNames,
+              woo_tag_names: tagNames
           });
       }
 
@@ -594,12 +646,12 @@ export async function adoptWooProducts() {
     console.log(`📦 Sincronizando Woo página ${page} (todas los estados)...`);
 
     // Pedimos TODOS los productos (publish, draft, pending, private)
-    // OPTIMIZACIÓN: Solo pedimos id, sku, status e imagenes
+    // OPTIMIZACIÓN: Solo pedimos id, sku, status, imagenes, categorias, tags
     const res = await wooApi.get("/products", {
       params: {
         per_page: perPage,
         page,
-        _fields: "id,sku,status,images" 
+        _fields: "id,sku,status,images,name,categories,tags" 
       }
     });
 
@@ -624,13 +676,19 @@ export async function adoptWooProducts() {
         missingSkuCount++;
       }
 
+      // Aplanar categorías y tags para cache rápida
+      const catNames = p.categories?.map(c => c.name).join(", ") || "";
+      const tagNames = p.tags?.map(t => t.name).join(", ") || "";
+
       payload.push({
         item: String(itemKey),
         woo_product_id: p.id,
         woo_status: p.status,
         ecommerce_active: p.status === "publish",
         image_url: p.images?.[0]?.src || null,
-        woo_name: p.name, // Sincronizamos el nombre de Woo
+        woo_name: p.name, 
+        woo_category_names: catNames, // NUEVO CAMPO CACHE
+        woo_tag_names: tagNames, // NUEVO CAMPO CACHE
         last_sync: new Date().toISOString()
       });
     }

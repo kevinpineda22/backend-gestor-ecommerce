@@ -1,5 +1,15 @@
-const API_URL = "http://localhost:3000/api";
-// Updated services
+const PROD_API = "https://backend-gestor-ecommerce.vercel.app/api";
+const LOCAL_API = "http://localhost:3000/api";
+
+// Detectar automáticamente si estamos en entorno local o producción
+const API_URL = (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"))
+  ? LOCAL_API
+  : PROD_API;
+
+export async function fetchDashboardStats() {
+    const res = await fetch(`${API_URL}/catalog/dashboard-stats`);
+    return res.json();
+}
 
 export async function fetchLiveComparison({ sede, page = 1, item = "", limit = 20, filter = 'all' }) {
   const params = new URLSearchParams({
@@ -11,6 +21,15 @@ export async function fetchLiveComparison({ sede, page = 1, item = "", limit = 2
   if (item) params.append("item", item);
 
   const res = await fetch(`${API_URL}/catalog/live-compare?${params}`);
+  return res.json();
+}
+
+export async function fetchWooDetailsBatch(ids) {
+  const res = await fetch(`${API_URL}/catalog/woo-details`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids })
+  });
   return res.json();
 }
 

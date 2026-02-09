@@ -152,12 +152,18 @@ export default function LiveComparison() {
       </div>
 
       <div style={{display: 'flex', gap: '20px', marginBottom: '20px', flexWrap: 'wrap'}}>
-        {/*
-        DESHABILITADOS TEMPORALMENTE BOTONES DE FILTRO SNAPSHOT
         <div className={`ge-card ge-stat-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => handleFilterClick('all')}> 
-          ...
-        </div> 
-        */}
+            <h3>Todos</h3>
+            <p style={{fontSize: '0.8rem', color: '#6b7280'}}>Sin filtrar</p>
+        </div>
+        <div className={`ge-card ge-stat-card ${filterType === 'diff' ? 'active' : ''}`} onClick={() => handleFilterClick('diff')}> 
+            <h3 style={{color: '#d97706'}}>⚠️ Diferencias</h3>
+            <p style={{fontSize: '0.8rem', color: '#6b7280'}}>Requieren Atención</p>
+        </div>
+        <div className={`ge-card ge-stat-card ${filterType === 'ok' ? 'active' : ''}`} onClick={() => handleFilterClick('ok')}> 
+            <h3 style={{color: '#059669'}}>✅ OK</h3>
+            <p style={{fontSize: '0.8rem', color: '#6b7280'}}>Sincronizados</p>
+        </div>
       </div>
 
       <div className="ge-card">

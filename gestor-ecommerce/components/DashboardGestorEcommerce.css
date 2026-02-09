@@ -1,0 +1,131 @@
+.ge-dashboard {
+  padding: 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.ge-dashboard h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 32px;
+  color: #111827;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 16px;
+}
+
+.ge-section-title {
+    font-size: 1rem;
+    color: #6b7280;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 16px;
+}
+
+.ge-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-bottom: 0px;
+}
+
+.ge-stat-card {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); /* Sombra suave elevada */
+  border: 1px solid #f3f4f6;
+  transition: transform 0.2s;
+}
+
+.ge-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+}
+
+/* Card especial para ventas */
+.ge-stat-card.primary-card {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    color: white;
+    border: none;
+}
+.ge-stat-card.primary-card h3, 
+.ge-stat-card.primary-card .ge-stat-value, 
+.ge-stat-card.primary-card .ge-stat-desc {
+    color: white !important;
+}
+
+.ge-stat-card h3 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  margin: 0 0 8px 0;
+}
+
+.ge-stat-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 4px;
+  line-height: 1.1;
+}
+
+.ge-stat-desc {
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+
+.ge-dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.ge-action-card {
+  background: white;
+  border-radius: 12px;
+  padding: 30px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+
+.ge-action-card h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #1f2937;
+}
+
+.ge-action-btn {
+  margin-top: auto;
+  width: 100%;
+  padding: 14px;
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 1rem;
+}
+
+.ge-action-btn:hover {
+  background-color: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.ge-action-btn.secondary {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.ge-action-btn.secondary:hover {
+  background-color: #e5e7eb;
+}
