@@ -267,7 +267,7 @@ export async function getCatalog() {
         marca: item.marca,
         grupo: item.grupo,
         subgrupo: item.subgrupo,
-        exists_in_woo: Boolean(ecommerce),
+        exists_in_woo: Boolean(ecommerce?.woo_product_id),
         woo_product_id: ecommerce?.woo_product_id || null,
         woo_status: ecommerce?.woo_status || null,
         ecommerce_active: ecommerce?.ecommerce_active || false,
@@ -642,6 +642,9 @@ export async function adoptWooProducts() {
   let totalProcessed = 0;
   let keepGoing = true;
 
+  // Guardamos TODOS los woo_product_id que existen actualmente en WooCommerce
+  const syncedWooIds = new Set();
+
   while (keepGoing) {
     console.log(`📦 Sincronizando Woo página ${page} (todas los estados)...`);
 
@@ -679,6 +682,9 @@ export async function adoptWooProducts() {
       // Aplanar categorías y tags para cache rápida
       const catNames = p.categories?.map(c => c.name).join(", ") || "";
       const tagNames = p.tags?.map(t => t.name).join(", ") || "";
+
+      // Registrar este ID como existente en Woo
+      syncedWooIds.add(p.id);
 
       payload.push({
         item: String(itemKey),
@@ -719,12 +725,75 @@ export async function adoptWooProducts() {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // LIMPIEZA: Marcar como inactivos los productos que YA NO existen en WooCommerce
+  // Esto resuelve el caso donde se borran productos de Woo pero quedan
+  // como "Publicados" en la tabla local ecommerce_products.
+  // ═══════════════════════════════════════════════════════════════
+  console.log("🧹 Limpiando productos que ya no existen en WooCommerce...");
+
+  // Obtener TODOS los registros locales que tienen woo_product_id asignado
+  // Usamos fetchAllRows para paginar y no quedarnos cortos con el límite de Supabase
+  let localLinked = [];
+  let fetchError = null;
+  try {
+    localLinked = await fetchAllRows("ecommerce_products", "id, woo_product_id, item");
+    // Filtrar solo los que tienen woo_product_id asignado
+    localLinked = localLinked.filter((r) => r.woo_product_id != null);
+    console.log(`📊 Total registros locales con woo_product_id: ${localLinked.length}`);
+  } catch (err) {
+    fetchError = err;
+  }
+
+  if (fetchError) {
+    console.error("❌ Error obteniendo productos locales para limpieza:", fetchError);
+  } else {
+    // Filtrar los que ya NO están en WooCommerce
+    const orphanedRecords = (localLinked || []).filter(
+      (r) => !syncedWooIds.has(r.woo_product_id)
+    );
+
+    if (orphanedRecords.length > 0) {
+      console.log(`🗑️ Encontrados ${orphanedRecords.length} productos huérfanos (ya no existen en Woo). Limpiando...`);
+
+      // Limpiar en lotes de 200 para no sobrecargar Supabase
+      const batchSize = 200;
+      for (let i = 0; i < orphanedRecords.length; i += batchSize) {
+        const batch = orphanedRecords.slice(i, i + batchSize);
+        const orphanIds = batch.map((r) => r.id);
+
+        const { error: cleanError } = await supabase
+          .from("ecommerce_products")
+          .update({
+            woo_product_id: null,
+            woo_status: null,
+            ecommerce_active: false,
+            woo_name: null,
+            woo_category_names: null,
+            woo_tag_names: null,
+            image_url: null,
+            last_sync: new Date().toISOString()
+          })
+          .in("id", orphanIds);
+
+        if (cleanError) {
+          console.error(`❌ Error limpiando lote de huérfanos:`, cleanError);
+        } else {
+          console.log(`✅ Limpiados ${batch.length} productos huérfanos (lote ${Math.floor(i / batchSize) + 1})`);
+        }
+      }
+    } else {
+      console.log("✅ No hay productos huérfanos que limpiar");
+    }
+  }
+
   console.log("🏁 Sincronización finalizada");
   console.log(`🎉 Total productos procesados: ${totalProcessed}`);
 
   return {
     ok: true,
     processed: totalProcessed,
+    cleaned: (localLinked || []).filter((r) => !syncedWooIds.has(r.woo_product_id)).length,
     message: "Sincronización con WooCommerce completada"
   };
 }

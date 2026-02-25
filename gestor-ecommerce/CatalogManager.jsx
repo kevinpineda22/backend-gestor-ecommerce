@@ -374,13 +374,21 @@ export default function CatalogManager() {
 
       <div style={{display: 'flex', gap: '20px', marginBottom: '20px', flexWrap: 'wrap'}}>
         <div className={`ge-card ge-stat-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => setFilterType('all')}>
-          <h3>Total Items</h3> <p>{data.length}</p>
+          <h3>Total Siesa</h3> 
+          <p>{data.length}</p>
+          <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Productos encontrados en el ERP</span>
         </div>
+        
         <div className={`ge-card ge-stat-card ${filterType === 'active' ? 'active' : ''}`} onClick={() => setFilterType('active')}>
-          <h3 style={{color: '#2563eb'}}>Activos Woo</h3> <p>{data.filter(d => d.ecommerce_active).length}</p>
+          <h3 style={{color: '#2563eb'}}>Publicados</h3> 
+          <p>{data.filter(d => d.ecommerce_active).length}</p>
+          <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Visibles actualmente en la tienda online</span>
         </div>
+        
         <div className={`ge-card ge-stat-card ${filterType === 'unlinked' ? 'active' : ''}`} onClick={() => setFilterType('unlinked')}>
-          <h3 style={{color: '#d97706'}}>⚠️ Sin Vincular</h3> <p>{data.filter(d => !d.exists_in_woo).length}</p>
+          <h3 style={{color: '#d97706'}}>⚠️ Pendientes Sincronizar</h3> 
+          <p>{data.filter(d => !d.exists_in_woo).length}</p>
+          <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Existen en Siesa pero NO en WooCommerce</span>
         </div>
       </div>
 
@@ -439,9 +447,15 @@ export default function CatalogManager() {
                     </td>
                     <td className="text-center">
                        {/* Toggle simple */}
-                       <label style={{position: 'relative', display: 'inline-block', width: '44px', height: '24px'}}>
-                        <input type="checkbox" checked={row.ecommerce_active} onChange={() => handleToggle(row.item, row.ecommerce_active)} style={{opacity: 0, width: 0, height: 0}} />
-                        <span style={{position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: row.ecommerce_active ? '#2563eb' : '#ccc', transition: '.4s', borderRadius: '34px'}}>
+                       <label style={{position: 'relative', display: 'inline-block', width: '44px', height: '24px', opacity: !row.exists_in_woo ? 0.5 : 1}}>
+                        <input 
+                            type="checkbox" 
+                            checked={row.ecommerce_active} 
+                            onChange={() => handleToggle(row.item, row.ecommerce_active)} 
+                            disabled={!row.exists_in_woo}
+                            style={{opacity: 0, width: 0, height: 0}} 
+                        />
+                        <span style={{position: 'absolute', cursor: !row.exists_in_woo ? 'not-allowed' : 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: row.ecommerce_active ? '#2563eb' : '#ccc', transition: '.4s', borderRadius: '34px'}}>
                           <span style={{position: 'absolute', content: '""', height: '18px', width: '18px', left: row.ecommerce_active ? '22px' : '4px', bottom: '3px', backgroundColor: 'white', transition: '.4s', borderRadius: '50%'}}></span>
                         </span>
                       </label>
