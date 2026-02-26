@@ -218,18 +218,36 @@ async function fetchAllRows(table, select, orderBy = null) {
   return allData;
 }
 
-export async function getCatalog() {
-  console.log("📥 Iniciando descarga completa de catálogo...");
+// ═══════════════════════════════════════════════════════════════
+// CACHÉ EN MEMORIA - Evita re-descargar 22k items en cada request
+// ═══════════════════════════════════════════════════════════════
+let _catalogCache = null;
+let _catalogCacheTime = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+export function invalidateCatalogCache() {
+  _catalogCache = null;
+  _catalogCacheTime = 0;
+  console.log("🗑️ Caché de catálogo invalidado");
+}
+
+async function getFullCatalog() {
+  // Si el caché es válido, retornar inmediatamente
+  if (_catalogCache && (Date.now() - _catalogCacheTime) < CACHE_TTL_MS) {
+    console.log("⚡ Catálogo servido desde caché en memoria");
+    return _catalogCache;
+  }
+
+  console.log("📥 Descargando catálogo completo (sin caché)...");
+  const start = Date.now();
 
   try {
-    // 1. Productos SIESA activos (TODOS)
-    const siesaItems = await fetchAllRows("items_siesa", "f120_id, f120_descripcion, grupo, subgrupo, marca, activo");
-    console.log(`✅ SIESA cargados: ${siesaItems.length}`);
-
-    // 2. Mapeo ecommerce (TODOS)
-    // Agregamos 'woo_name', 'woo_category_names', 'woo_tag_names' a la selección
-    const ecommerceMap = await fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, image_url, woo_name, woo_category_names, woo_tag_names");
-    console.log(`✅ Ecommerce Map cargados: ${ecommerceMap.length}`);
+    // PARALELO: Descargar ambas tablas al mismo tiempo
+    const [siesaItems, ecommerceMap] = await Promise.all([
+      fetchAllRows("items_siesa", "f120_id, f120_descripcion, grupo, subgrupo, marca, activo"),
+      fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, image_url, woo_name, woo_category_names, woo_tag_names")
+    ]);
+    console.log(`✅ SIESA: ${siesaItems.length} | Ecommerce: ${ecommerceMap.length} (${Date.now() - start}ms)`);
 
     // 3. Crear mapa INTELIGENTE
     const ecommerceByItem = new Map();
@@ -278,16 +296,91 @@ export async function getCatalog() {
       };
     });
     
-    console.log(`🚀 Catálogo unificado generado: ${catalog.length} items`);
+    console.log(`🚀 Catálogo unificado: ${catalog.length} items (${Date.now() - start}ms total)`);
+
+    // Guardar en caché
+    _catalogCache = catalog;
+    _catalogCacheTime = Date.now();
+
+    return catalog;
+  } catch (error) {
+    console.error("Error en getFullCatalog:", error);
+    throw error;
+  }
+}
+
+// Mantener compatibilidad con el endpoint original (retorna TODO)
+export async function getCatalog() {
+  try {
+    const catalog = await getFullCatalog();
+    return { ok: true, total: catalog.length, data: catalog };
+  } catch (error) {
+    return { ok: false, message: "Error cargando catálogo", error };
+  }
+}
+
+/**
+ * Catálogo paginado con filtros server-side.
+ * Retorna solo la página solicitada + conteos para las tarjetas de stats.
+ */
+export async function getCatalogPaginated({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false } = {}) {
+  try {
+    const catalog = await getFullCatalog();
+
+    // Conteos globales (para las tarjetas de stats)
+    const counts = {
+      total: catalog.length,
+      active: 0,
+      unlinked: 0,
+      no_image: 0
+    };
+    for (const item of catalog) {
+      if (item.ecommerce_active) counts.active++;
+      if (!item.exists_in_woo) counts.unlinked++;
+      if (!item.image_url) counts.no_image++;
+    }
+
+    // Filtrar
+    let filtered = catalog;
+
+    // Filtro por búsqueda
+    if (search.trim()) {
+      const s = search.trim().toLowerCase();
+      if (exactSearch) {
+        // Búsqueda exacta por SKU/Item (Enter)
+        filtered = filtered.filter(row =>
+          String(row.item).trim().toLowerCase() === s
+        );
+      } else {
+        // Búsqueda parcial por coincidencias (mientras escribe)
+        filtered = filtered.filter(row =>
+          String(row.item).toLowerCase().includes(s) ||
+          (row.descripcion && row.descripcion.toLowerCase().includes(s))
+        );
+      }
+    }
+
+    // Filtro por tipo
+    if (filter === "active") filtered = filtered.filter(r => r.ecommerce_active);
+    else if (filter === "unlinked") filtered = filtered.filter(r => !r.exists_in_woo);
+    else if (filter === "no_image") filtered = filtered.filter(r => !r.image_url);
+
+    const totalFiltered = filtered.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const data = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
     return {
       ok: true,
-      total: catalog.length,
-      data: catalog,
+      data,
+      page: safePage,
+      pageSize,
+      totalFiltered,
+      totalPages,
+      counts
     };
-
   } catch (error) {
-    console.error("Error en getCatalog:", error);
+    console.error("Error en getCatalogPaginated:", error);
     return { ok: false, message: "Error cargando catálogo", error };
   }
 }
@@ -626,6 +719,9 @@ export async function toggleCatalogItem({ item, active }) {
     })
     .eq("item", sku);
 
+  // Invalidar caché
+  invalidateCatalogCache();
+
   return {
     ok: true,
     created: false,
@@ -704,10 +800,13 @@ export async function adoptWooProducts() {
     }
 
     // UPSERT EN BLOQUE
-    // Actualiza estado incluso si ya existe
+    // Usa "item" (SKU) como clave de conflicto para que al re-subir productos a Woo
+    // se actualicen los registros existentes en vez de crear duplicados.
+    // Esto cubre el caso donde se borran todos los productos de Woo y se vuelven a crear
+    // (nuevos woo_product_id pero mismo SKU).
     const { error: upsertError } = await supabase
       .from("ecommerce_products")
-      .upsert(payload, { onConflict: "woo_product_id" });
+      .upsert(payload, { onConflict: "item" });
 
     if (upsertError) {
       console.error("❌ Error sync batch:", upsertError);
@@ -789,6 +888,9 @@ export async function adoptWooProducts() {
 
   console.log("🏁 Sincronización finalizada");
   console.log(`🎉 Total productos procesados: ${totalProcessed}`);
+
+  // Invalidar caché para que la próxima carga refleje los cambios
+  invalidateCatalogCache();
 
   return {
     ok: true,

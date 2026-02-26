@@ -55,9 +55,17 @@ export async function adoptWooProducts() {
   return res.json();
 }
 
-export async function fetchCatalog() {
-  // Agregamos timestamp para evitar caché del navegador
-  const res = await fetch(`${API_URL}/catalog?t=${Date.now()}`);
+export async function fetchCatalog({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false } = {}) {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    pageSize: pageSize.toString(),
+    filter,
+    t: Date.now().toString()
+  });
+  if (search.trim()) params.append("search", search.trim());
+  if (exactSearch) params.append("exactSearch", "true");
+
+  const res = await fetch(`${API_URL}/catalog?${params}`);
   return res.json();
 }
 

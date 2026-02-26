@@ -41,7 +41,13 @@ export async function getWooDetailsBatch(req, res) {
  * Listar catálogo unificado
  */
 export async function listCatalog(req, res) {
-  const result = await catalogService.getCatalog();
+  const page = Number(req.query.page) || 1;
+  const pageSize = Number(req.query.pageSize) || 20;
+  const search = req.query.search || "";
+  const filter = req.query.filter || "all";
+  const exactSearch = req.query.exactSearch === "true";
+
+  const result = await catalogService.getCatalogPaginated({ page, pageSize, search, filter, exactSearch });
 
   if (!result.ok) {
     return res.status(500).json(result);

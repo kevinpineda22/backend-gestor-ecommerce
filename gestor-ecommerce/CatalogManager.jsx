@@ -12,10 +12,12 @@ export default function CatalogManager() {
   const [filterType, setFilterType] = useState('all'); // all, active, unlinked, no_image
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
+  const [totalPages, setTotalPages] = useState(1);
+  const [counts, setCounts] = useState({ total: 0, active: 0, unlinked: 0, no_image: 0 });
   const [dataError, setDataError] = useState(null);
 
   // Search Logic
-  const [exactSearchTriggered, setExactSearchTriggered] = useState(false);
+  const [searchDebounce, setSearchDebounce] = useState(null);
 
   // Woo Enrich Data (Map: woo_id => { categories:[], tags:[] })
   const [wooRichData, setWooRichData] = useState({});
@@ -32,12 +34,16 @@ export default function CatalogManager() {
   const [newCatParent, setNewCatParent] = useState(0); 
   const [creatingCat, setCreatingCat] = useState(false);
 
-  // --- CARGA DE DATOS ---
-  const loadCatalog = async () => {
+  // --- CARGA DE DATOS (PAGINADA) ---
+  const loadCatalog = async (p = page, s = search, f = filterType, exact = false) => {
     setLoading(true);
     try {
-      const res = await fetchCatalog();
-      if (res.ok) setData(res.data);
+      const res = await fetchCatalog({ page: p, pageSize, search: s, filter: f, exactSearch: exact });
+      if (res.ok) {
+        setData(res.data);
+        setTotalPages(res.totalPages || 1);
+        if (res.counts) setCounts(res.counts);
+      }
     } catch (error) {
       console.error("Error loading catalog", error);
     } finally {
@@ -74,10 +80,21 @@ export default function CatalogManager() {
   };
 
   useEffect(() => {
-    loadCatalog();
+    loadCatalog(1, "", "all");
     loadCategories();
     loadTags();
   }, []);
+
+  // Recargar cuando cambia el filtro
+  useEffect(() => {
+    setPage(1);
+    loadCatalog(1, search, filterType);
+  }, [filterType]);
+
+  // Recargar cuando cambia la página
+  useEffect(() => {
+    loadCatalog(page, search, filterType);
+  }, [page]);
 
   // --- ACCIONES ---
   const handleSync = async () => {
@@ -86,7 +103,8 @@ export default function CatalogManager() {
     try {
       const res = await adoptWooProducts();
       if (res.ok) {
-        loadCatalog();
+        loadCatalog(1, search, filterType);
+        setPage(1);
         alert(`Sincronización completada.`);
       } else {
         alert("Hubo un problema con la sincronización");
@@ -304,37 +322,27 @@ export default function CatalogManager() {
     finally { setCreatingCat(false); }
   };
 
-  // --- FILTRADO Y PAGINACIÓN ---
-  const filteredData = data.filter(row => {
-    let matchSearch = false;
+  // --- FILTRADO Y PAGINACIÓN (SERVER-SIDE) ---
+  // La búsqueda se envía al server con debounce
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearch(val);
     
-    // Si se presionó ENTER y hay texto, buscar EXACTAMENTE por Item/SKU
-    if (exactSearchTriggered && search.trim() !== "") {
-        matchSearch = String(row.item).trim() === search.trim();
-    } else {
-        // Busqueda parcial (comportamiento default)
-        matchSearch = row.descripcion?.toLowerCase().includes(search.toLowerCase()) || row.item?.includes(search);
+    // Debounce: esperar 400ms antes de buscar
+    if (searchDebounce) clearTimeout(searchDebounce);
+    setSearchDebounce(setTimeout(() => {
+      setPage(1);
+      loadCatalog(1, val, filterType);
+    }, 400));
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      if (searchDebounce) clearTimeout(searchDebounce);
+      setPage(1);
+      loadCatalog(1, search, filterType, true); // Búsqueda exacta por SKU
     }
-    
-    if (!matchSearch) return false;
-    if (filterType === 'active') return row.ecommerce_active;
-    if (filterType === 'unlinked') return !row.exists_in_woo;
-    if (filterType === 'no_image') return !row.image_url;
-    return true;
-  });
-
-  const totalPages = Math.ceil(filteredData.length / pageSize);
-  const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
-
-  // --- EFECTO ENRIQUECEDOR: (DESHABILITADO POR CAMBIO A CACHE DB) ---
-  /*
-  useEffect(() => {
-     if (paginatedData.length === 0) return;
-     const idsToFetch = paginatedData.filter(row => row.exists_in_woo && row.woo_product_id && !wooRichData[row.woo_product_id]).map(row => row.woo_product_id);
-     if (idsToFetch.length === 0) return; 
-     fetchWooDetailsBatch(idsToFetch).then(res => { if(res.ok && res.data) setWooRichData(prev => ({ ...prev, ...res.data })); });
-  }, [paginatedData, wooRichData]); 
-  */
+  };
 
   // --- RENDER ---
   return (
@@ -357,16 +365,8 @@ export default function CatalogManager() {
           <input 
             className="ge-input" type="text" placeholder="Buscar..." 
             value={search} 
-            onChange={(e) => { 
-                setSearch(e.target.value); 
-                setPage(1); 
-                setExactSearchTriggered(false); // Al escribir, volver a modo "sugerencias"
-            }}
-            onKeyDown={(e) => {
-                if(e.key === 'Enter') {
-                    setExactSearchTriggered(true); // Al dar Enter, activar modo "exacto"
-                }
-            }}
+            onChange={handleSearchChange}
+            onKeyDown={handleSearchKeyDown}
             style={{width: '250px'}}
           />
         </div>
@@ -375,19 +375,19 @@ export default function CatalogManager() {
       <div style={{display: 'flex', gap: '20px', marginBottom: '20px', flexWrap: 'wrap'}}>
         <div className={`ge-card ge-stat-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => setFilterType('all')}>
           <h3>Total Siesa</h3> 
-          <p>{data.length}</p>
+          <p>{counts.total}</p>
           <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Productos encontrados en el ERP</span>
         </div>
         
         <div className={`ge-card ge-stat-card ${filterType === 'active' ? 'active' : ''}`} onClick={() => setFilterType('active')}>
           <h3 style={{color: '#2563eb'}}>Publicados</h3> 
-          <p>{data.filter(d => d.ecommerce_active).length}</p>
+          <p>{counts.active}</p>
           <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Visibles actualmente en la tienda online</span>
         </div>
         
         <div className={`ge-card ge-stat-card ${filterType === 'unlinked' ? 'active' : ''}`} onClick={() => setFilterType('unlinked')}>
           <h3 style={{color: '#d97706'}}>⚠️ Pendientes Sincronizar</h3> 
-          <p>{data.filter(d => !d.exists_in_woo).length}</p>
+          <p>{counts.unlinked}</p>
           <span style={{fontSize:'0.75rem', color:'#6b7280', fontWeight:'normal'}}>Existen en Siesa pero NO en WooCommerce</span>
         </div>
       </div>
@@ -407,11 +407,11 @@ export default function CatalogManager() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" className="ge-loading">Cargando catálogo completo...</td></tr>
-              ) : paginatedData.length === 0 ? (
+                <tr><td colSpan="6" className="ge-loading">Cargando catálogo...</td></tr>
+              ) : data.length === 0 ? (
                 <tr><td colSpan="6" className="ge-loading">No se encontraron productos</td></tr>
               ) : (
-                paginatedData.map((row) => (
+                data.map((row) => (
                   <tr key={row.item} className={!row.exists_in_woo ? "ge-row-warning" : ""}>
                     <td>
                       {row.image_url ? (
