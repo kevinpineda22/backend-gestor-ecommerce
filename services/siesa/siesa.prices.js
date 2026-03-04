@@ -2,6 +2,34 @@ import { executeSiesaQuery } from "./siesa.client.js";
 
 const DESC_PRECIOS = "API_v2_ItemsPrecios";
 
+// ═══════════════════════════════════════════════
+// CACHÉ EN MEMORIA - Precios Siesa (TTL 3 min)
+// ═══════════════════════════════════════════════
+const _priceCache = new Map();
+const PRICE_CACHE_TTL = 3 * 60 * 1000; // 3 minutos
+
+function getCachedPrice(cacheKey) {
+  const entry = _priceCache.get(cacheKey);
+  if (entry && (Date.now() - entry.time) < PRICE_CACHE_TTL) return entry.data;
+  return undefined;
+}
+
+function setCachedPrice(cacheKey, data) {
+  _priceCache.set(cacheKey, { data, time: Date.now() });
+  // Limpieza periódica: si el caché crece mucho, limpiar entradas viejas
+  if (_priceCache.size > 5000) {
+    const now = Date.now();
+    for (const [k, v] of _priceCache) {
+      if (now - v.time > PRICE_CACHE_TTL) _priceCache.delete(k);
+    }
+  }
+}
+
+export function invalidatePriceCache() {
+  _priceCache.clear();
+  console.log("🗑️ Caché de precios Siesa limpiado");
+}
+
 const normalizeList = (lista) => {
   if (!lista || lista === "GRAL" || lista === "0") return 0;
   const n = String(lista).replace(/\D/g, "");
@@ -14,6 +42,10 @@ const isUnd = (u) =>
   );
 
 export async function getLivePriceForItem({ item, sedeLista }) {
+  const cacheKey = `${item}_${sedeLista}`;
+  const cached = getCachedPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
   const rows = await executeSiesaQuery({
     descripcion: DESC_PRECIOS,
     parametros: `f120_id=${item}`
@@ -21,6 +53,7 @@ export async function getLivePriceForItem({ item, sedeLista }) {
 
   if (!rows || rows.length === 0) {
     console.warn(`[getLivePriceForItem] Sin datos iniciales para item: ${item}`);
+    setCachedPrice(cacheKey, null);
     return null;
   }
 
@@ -40,6 +73,7 @@ export async function getLivePriceForItem({ item, sedeLista }) {
   if (!candidates.length) {
     // Debug log para ver por qué se filtraron todos
     console.warn(`[getLivePriceForItem] 0 candidatos tras filtros. Rows encontrados: ${rows.length}`);
+    setCachedPrice(cacheKey, null);
     return null;
   }
 
@@ -62,5 +96,7 @@ export async function getLivePriceForItem({ item, sedeLista }) {
     return String(b.fecha).localeCompare(String(a.fecha));
   });
 
-  return candidates[0];
+  const result = candidates[0];
+  setCachedPrice(cacheKey, result);
+  return result;
 }

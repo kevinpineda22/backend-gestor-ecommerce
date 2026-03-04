@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, createCategory, fetchTags, createTag, deleteTag, fetchProductDetail, fetchWooDetailsBatch } from "./services";
+import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, fetchTags, createTag, deleteTag, fetchProductDetail, fetchWooDetailsBatch } from "./services";
 import "./GestorEcommerce.css";
 import "./components/CatalogManager.css";
 import ProductEditModal from "./components/ProductEditModal";
@@ -29,10 +29,6 @@ export default function CatalogManager() {
   // Categorías y Etiquetas (Globales para pasar al modal)
   const [categories, setCategories] = useState([]);
   const [tags, setTags] = useState([]);
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [newCatName, setNewCatName] = useState("");
-  const [newCatParent, setNewCatParent] = useState(0); 
-  const [creatingCat, setCreatingCat] = useState(false);
 
   // --- CARGA DE DATOS (PAGINADA) ---
   const loadCatalog = async (p = page, s = search, f = filterType, exact = false) => {
@@ -174,7 +170,10 @@ export default function CatalogManager() {
                     name: res.data.name || prev.name,
                     image_url: res.data.images?.[0]?.src || prev.image_url, // Mantenemos compatibilidad legacy
                     images: wooImages.length > 0 ? wooImages : (prev.image_url ? [prev.image_url] : []), // Nuevo Array
-                    ecommerce_active: res.data.status === 'publish'
+                    ecommerce_active: res.data.status === 'publish',
+                    // PUM (Precio por Unidad de Medida)
+                    pum_qty: res.data.meta_data?.find(m => m.key === 'pum_qty')?.value || "",
+                    pum_unit: res.data.meta_data?.find(m => m.key === 'pum_unit')?.value || ""
                 }));
             }
         } catch (error) {
@@ -206,7 +205,9 @@ export default function CatalogManager() {
                 // image_url: ... (Ya no es necesario si el backend soporta 'images')
                 categories: modifiedItem.categories,
                 tags: modifiedItem.tags,
-                brands: modifiedItem.brands
+                brands: modifiedItem.brands,
+                pum_qty: modifiedItem.pum_qty || "",
+                pum_unit: modifiedItem.pum_unit || ""
             });
         } else {
             // ACTUALIZAR
@@ -215,7 +216,9 @@ export default function CatalogManager() {
                 images: finalImages, // Enviamos Array
                 categories: modifiedItem.categories, 
                 tags: modifiedItem.tags,
-                brands: modifiedItem.brands 
+                brands: modifiedItem.brands,
+                pum_qty: modifiedItem.pum_qty || "",
+                pum_unit: modifiedItem.pum_unit || ""
             });
         }
 
@@ -308,20 +311,6 @@ export default function CatalogManager() {
       }
   };
 
-  const handleCreateCategory = async () => {
-    if(!newCatName.trim()) return;
-    setCreatingCat(true);
-    try {
-        const res = await createCategory({ name: newCatName, parent: Number(newCatParent) });
-        if(res.ok) {
-            setNewCatName(""); setNewCatParent(0);
-            loadCategories();
-            alert("Categoría creada con éxito");
-        }
-    } catch (e) { alert("Error creando categoría"); }
-    finally { setCreatingCat(false); }
-  };
-
   // --- FILTRADO Y PAGINACIÓN (SERVER-SIDE) ---
   // La búsqueda se envía al server con debounce
   const handleSearchChange = (e) => {
@@ -354,10 +343,6 @@ export default function CatalogManager() {
         </div>
 
         <div className="ge-controls">
-          <button className="ge-button" onClick={() => setShowCategoryModal(true)} style={{backgroundColor: '#8b5cf6', borderColor: '#7c3aed'}}>
-            📂 Categorías
-          </button>
-          
           <button className="ge-button secondary" onClick={handleSync} disabled={syncing}>
             {syncing ? "⏳ Sincronizando..." : "🔄 Sincronizar"}
           </button>
@@ -477,24 +462,6 @@ export default function CatalogManager() {
           <span>Página {page} de {totalPages || 1}</span>
           <button disabled={page>=totalPages} onClick={() => setPage(p=>p+1)} className="ge-btn">Siguiente</button>
       </div>
-
-      {/* Modal Categorías Rápido (Legacy pero útil) */}
-      {showCategoryModal && (
-          <div className="ge-modal-overlay">
-            <div className="ge-modal">
-              <h3>Gestión de Categorías</h3>
-              <div style={{display: 'flex', gap: '8px', marginBottom: '16px'}}>
-                 <input type="text" value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nueva Categoría" className="ge-input" />
-                 <select value={newCatParent} onChange={(e) => setNewCatParent(e.target.value)} className="ge-select">
-                    <option value={0}>Raíz (Grupo)</option>
-                    {categories.filter(c=>c.parent===0).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                 </select>
-                 <button onClick={handleCreateCategory} disabled={creatingCat} className="ge-button primary">+</button>
-              </div>
-              <button className="ge-button secondary" onClick={() => setShowCategoryModal(false)}>Cerrar</button>
-            </div>
-          </div>
-      )}
 
       {/* NUEVO MODAL DE EDICIÓN IMPORTADO */}
       {editingItem && (

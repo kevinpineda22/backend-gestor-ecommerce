@@ -429,6 +429,20 @@ export async function updateProductInWoo(wooId, data) {
       payload.brands = data.brands.map(id => ({ id }));
   }
 
+  // Manejo de PUM (Precio por Unidad de Medida) via meta_data
+  if (data.pum_qty !== undefined || data.pum_unit !== undefined) {
+      const pumMeta = [];
+      if (data.pum_qty !== undefined) {
+          pumMeta.push({ key: "pum_qty", value: String(data.pum_qty) });
+          pumMeta.push({ key: "_pum_qty", value: String(data.pum_qty) });
+      }
+      if (data.pum_unit !== undefined) {
+          pumMeta.push({ key: "pum_unit", value: String(data.pum_unit) });
+          pumMeta.push({ key: "_pum_unit", value: String(data.pum_unit) });
+      }
+      payload.meta_data = [...(payload.meta_data || []), ...pumMeta];
+  }
+
   // 1. Update Woo
   let wooResponse;
   try {
@@ -550,6 +564,20 @@ export async function createProductInWoo(data) {
       if (data.brands && Array.isArray(data.brands)) {
            // Algunos plugins usan 'brands' como campo top-level
            payload.brands = data.brands.map(id => ({ id }));
+      }
+
+      // PUM (Precio por Unidad de Medida) via meta_data
+      if (data.pum_qty || data.pum_unit) {
+          const pumMeta = [];
+          if (data.pum_qty) {
+              pumMeta.push({ key: "pum_qty", value: String(data.pum_qty) });
+              pumMeta.push({ key: "_pum_qty", value: String(data.pum_qty) });
+          }
+          if (data.pum_unit) {
+              pumMeta.push({ key: "pum_unit", value: String(data.pum_unit) });
+              pumMeta.push({ key: "_pum_unit", value: String(data.pum_unit) });
+          }
+          payload.meta_data = [...(payload.meta_data || []), ...pumMeta];
       }
 
       const response = await wooApi.post("/products", payload);
@@ -942,22 +970,11 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
   const wooIds = products.map((p) => p.woo_product_id); // Re-declaramos por seguridad
   const wooDataMap = await getWooPricesByIds(wooIds);
 
-  // 2️⃣ Optimización: Requests
-  // 🔄 REVERTIDO: Usuario prefiere carga lenta segura en vez de cache rápida masiva compleja.
-  // Siempre usamos modo LIVE paginado.
-  const USE_CACHE = false; 
-  
-  /* 
-  // CÓDIGO CACHE DESHABILITADO
-  if (USE_CACHE) {
-     console.log(`🚀 Modo Rápido (Cache) detectado para ${products.length} items.`);
-     ...
-  } 
-  */
-
-  // 🔽 MODO LENTO / LIVE (Pocos items)
-  // 🚀 Reducimos drásticamente a 5 para evitar error 429 (Too Many Requests)
-  const BATCH_SIZE = 5;
+  // 2️⃣ Optimización: Procesamiento en paralelo con caché Siesa
+  // El caché individual de precio/stock (3 min TTL) hace que items ya consultados
+  // se resuelvan instantáneamente sin llamar a Siesa de nuevo.
+  // Batch de 10 en paralelo (el caché individual absorbe la carga).
+  const BATCH_SIZE = 10;
   const results = [];
 
   for (let i = 0; i < products.length; i += BATCH_SIZE) {
@@ -1019,9 +1036,9 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
 
     results.push(...batchResults);
 
-    // 🛑 PAUSA entre lotes para dejar respirar a la API de Siesa
+    // 🛑 Pausa reducida entre lotes (el caché individual de Siesa evita llamadas duplicadas)
     if (i + BATCH_SIZE < products.length) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }
 

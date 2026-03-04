@@ -9,7 +9,8 @@ const CURRENCY = new Intl.NumberFormat("es-CO", {
 });
 
 export default function LiveComparison() {
-  const [data, setData] = useState([]);
+  const [rawData, setRawData] = useState([]); // Datos sin filtrar del server
+  const [data, setData] = useState([]);        // Datos filtrados para mostrar
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [sede, setSede] = useState("PV001");
@@ -17,22 +18,22 @@ export default function LiveComparison() {
   const [page, setPage] = useState(1);
   const [totalItemsDb, setTotalItemsDb] = useState(0); 
   const [filterType, setFilterType] = useState('diff'); 
+
+  // Función pura para filtrar (sin llamar al server)
+  const applyFilter = (rows, filter) => {
+    if (filter === 'diff') return rows.filter(r => r.price_status !== 'OK');
+    if (filter === 'no_stock') return rows.filter(r => r.stock_disponible <= 0 || r.price_status === 'NO_STOCK');
+    if (filter === 'ok') return rows.filter(r => r.price_status === 'OK');
+    return rows;
+  };
   
   const loadData = async () => {
     setLoading(true);
     try {
-      // 🔄 RETORNO A MODO CLÁSICO: Usamos el endpoint normal que ahora fuerza Live Mode
-      // NOTA: 'filter' en el endpoint live es limitado (solo filtra por BD local de ecommerce_products, no compara)
-      // Pero si el usuario borró la tabla de snapshot, esto es lo más seguro.
-      const res = await fetchLiveComparison({ sede, page, item: search }); // Quitamos filterType que era para SQL snapshot
+      const res = await fetchLiveComparison({ sede, page, item: search });
       if (res.ok) {
-        // filtrar "diff" en CLIENTE si estamos en modo live
-        let rows = res.data;
-        if (filterType === 'diff') rows = rows.filter(r => r.price_status !== 'OK');
-        if (filterType === 'no_stock') rows = rows.filter(r => r.stock_disponible <= 0 || r.price_status === 'NO_STOCK');
-        if (filterType === 'ok') rows = rows.filter(r => r.price_status === 'OK');
-        
-        setData(rows);
+        setRawData(res.data);
+        setData(applyFilter(res.data, filterType));
         if (res.total) setTotalItemsDb(res.total);
       }
     } catch (error) {
@@ -59,7 +60,12 @@ export default function LiveComparison() {
 
   useEffect(() => {
     loadData();
-  }, [sede, page, filterType]); // Recargar si cambia filtro, sede o página
+  }, [sede, page]); // Solo re-fetch cuando cambia sede o página
+
+  // Filtro local instantáneo (sin llamar al server)
+  useEffect(() => {
+    setData(applyFilter(rawData, filterType));
+  }, [filterType]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -83,12 +89,14 @@ export default function LiveComparison() {
         if (res.ok) {
             alert("✅ Producto sincronizado correctamente");
             // Actualizar localmente la fila para reflejar que ya no hay diferencia
-            setData(prev => prev.map(p => {
+            const updater = (prev) => prev.map(p => {
                 if (p.item === row.item) {
-                    return { ...p, woo_price: row.siesa_price, price_diff: 0, price_status: 'OK' }; // Regresamos status live
+                    return { ...p, woo_price: row.siesa_price, price_diff: 0, price_status: 'OK' };
                 }
                 return p;
-            }));
+            });
+            setRawData(updater);
+            setData(prev => applyFilter(updater(rawData), filterType));
         } else {
             alert("❌ Error: " + (res.message || "No se pudo actualizar"));
         }
@@ -98,10 +106,9 @@ export default function LiveComparison() {
     }
   };
 
-  // Los filtros ya se hacen en backend, aquí solo mostramos badges activos
+  // Los filtros se aplican localmente (instantáneo, sin re-fetch)
   const handleFilterClick = (type) => { 
       setFilterType(type);
-      setPage(1); // Reset page on filter change
   };
 
   return (

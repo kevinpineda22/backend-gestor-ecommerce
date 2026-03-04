@@ -151,6 +151,54 @@ export default function ProductEditModal({
                                 </div>
                             </div>
 
+                            {/* PUM (Precio por Unidad de Medida) */}
+                            <div className="cm-form-group" style={{marginTop: '16px'}}>
+                                <label className="cm-label">📐 PUM (Precio por Unidad de Medida)</label>
+                                <p style={{fontSize: '0.78rem', color: '#64748b', marginBottom: '8px'}}>
+                                    Se calcula automáticamente: Precio ÷ Cantidad = PUM por unidad.
+                                </p>
+                                <div style={{display: 'flex', gap: '10px', alignItems: 'flex-end'}}>
+                                    <div style={{flex: 1}}>
+                                        <label className="cm-label-small">Cantidad</label>
+                                        <input 
+                                            type="number"
+                                            className="cm-input"
+                                            value={localItem.pum_qty || ""}
+                                            onChange={(e) => setLocalItem({...localItem, pum_qty: e.target.value})}
+                                            placeholder="Ej: 250"
+                                            min="0"
+                                            step="any"
+                                        />
+                                    </div>
+                                    <div style={{flex: 1}}>
+                                        <label className="cm-label-small">Unidad</label>
+                                        <select
+                                            className="cm-input"
+                                            value={localItem.pum_unit || ""}
+                                            onChange={(e) => setLocalItem({...localItem, pum_unit: e.target.value})}
+                                        >
+                                            <option value="">-- Seleccionar --</option>
+                                            <option value="g">g (gramos)</option>
+                                            <option value="kg">kg (kilogramos)</option>
+                                            <option value="ml">ml (mililitros)</option>
+                                            <option value="l">l (litros)</option>
+                                            <option value="und">und (unidades)</option>
+                                            <option value="m">m (metros)</option>
+                                            <option value="cm">cm (centímetros)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                {localItem.pum_qty && localItem.pum_unit && (
+                                    <div style={{
+                                        marginTop: '8px', padding: '8px 12px', 
+                                        background: '#f0fdf4', border: '1px solid #bbf7d0', 
+                                        borderRadius: '6px', fontSize: '0.85rem', color: '#166534'
+                                    }}>
+                                        ✅ PUM activo: se mostrará el precio por <strong>{localItem.pum_unit}</strong> en la tienda.
+                                    </div>
+                                )}
+                            </div>
+
                              {/* Toggle Activo (Mover aquí tiene sentido) */}
                              <div className="cm-form-group" style={{marginTop: '20px'}}>
                                 <label className="cm-label">Estado de Publicación</label>

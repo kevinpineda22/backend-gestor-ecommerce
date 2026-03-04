@@ -5,7 +5,7 @@ import CatalogManager from './CatalogManager';
 import './GestorEcommerce.css';
 
 const GestorEcommerce = () => {
-  const [activeTab, setActiveTab] = useState('audit');
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   const renderContent = () => {
     switch (activeTab) {
