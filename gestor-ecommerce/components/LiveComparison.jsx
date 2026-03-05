@@ -8,16 +8,18 @@ const CURRENCY = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-export default function LiveComparison() {
+export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], onSedeChange }) {
   const [rawData, setRawData] = useState([]); // Datos sin filtrar del server
   const [data, setData] = useState([]);        // Datos filtrados para mostrar
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [sede, setSede] = useState("PV001");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [totalItemsDb, setTotalItemsDb] = useState(0); 
   const [filterType, setFilterType] = useState('diff'); 
+
+  // Sede actual viene del padre via sedeInfo.codigo_siesa
+  const sede = sedeInfo?.codigo_siesa || "PV001";
 
   // Función pura para filtrar (sin llamar al server)
   const applyFilter = (rows, filter) => {
@@ -60,7 +62,7 @@ export default function LiveComparison() {
 
   useEffect(() => {
     loadData();
-  }, [sede, page]); // Solo re-fetch cuando cambia sede o página
+  }, [sede, page]); // Re-fetch cuando cambia sede (via props) o página
 
   // Filtro local instantáneo (sin llamar al server)
   useEffect(() => {
@@ -129,19 +131,21 @@ export default function LiveComparison() {
             {syncing ? "Sincronizando..." : "📥 Importar de Woo"}
           </button>
 
-          <select 
-            className="ge-select"
-            value={sede} 
-            onChange={(e) => setSede(e.target.value)}
-          >
-            <option value="PV001">Sede Principal (P01)</option>
-            <option value="00201">Sede 00201 (P02)</option>
-            <option value="00301">Sede 00301 (P03)</option>
-            <option value="00401">Sede 00401 (P04)</option>
-            <option value="00601">Sede 00601 (P05)</option>
-            <option value="00701">Sede 00701 (P06)</option>
-            <option value="00801">Sede 00801 (P07)</option>
-          </select>
+          {esAdminGlobal && sedes.length > 1 ? (
+            <select 
+              className="ge-select"
+              value={sedeInfo?.id || ''}
+              onChange={(e) => onSedeChange(e.target.value)}
+            >
+              {sedes.map(s => (
+                <option key={s.id} value={s.id}>{s.nombre} ({s.codigo_siesa})</option>
+              ))}
+            </select>
+          ) : (
+            <span style={{padding: '8px 12px', background: '#f3f4f6', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 500}}>
+              {sedeInfo?.nombre || 'Sede'}
+            </span>
+          )}
 
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px' }}>
             <input 

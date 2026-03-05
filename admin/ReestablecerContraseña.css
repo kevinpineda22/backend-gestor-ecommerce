@@ -1,0 +1,183 @@
+/* --- Variables de Color Corporativas --- */
+:root {
+  --color-principal: #210d65; /* Azul/Morado corporativo */
+  --color-acento: #89dc00; /* Verde corporativo */
+  --color-fondo: linear-gradient(135deg, hsl(60, 47%, 97%) 0%, #f0f8ff 100%);
+  --color-tarjeta: #ffffff;
+  --color-texto-principal: #210d65;
+  --color-texto-secundario: #555;
+  --color-borde-input: #ccc;
+  --color-exito: #28a745;
+  --color-error: #dc3545;
+  --fuente-principal: "Roboto", sans-serif;
+  --sombra-tarjeta: 0 8px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* --- Contenedor Principal --- */
+.reset-container {
+  font-family: var(--fuente-principal);
+  background: var(--color-fondo);
+  color: var(--color-texto-principal);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+/* --- Tarjeta del Formulario --- */
+.reset-card {
+  background-color: var(--color-tarjeta);
+  padding: 2.5rem 2rem;
+  border-radius: 15px;
+  box-shadow: var(--sombra-tarjeta);
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  animation: fadeIn 0.5s ease-out;
+  border-top: 5px solid var(--color-principal);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Logo de la Empresa --- */
+.reset-logo {
+  width: auto;
+  max-width: 200px;
+  height: auto;
+  margin: 0 auto 1.5rem auto;
+  object-fit: contain;
+}
+
+/* --- Títulos --- */
+.reset-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--color-texto-principal);
+}
+
+.reset-subtitle {
+  color: var(--color-texto-secundario);
+  margin-bottom: 2rem;
+}
+
+/* --- Estilos para Inputs --- */
+.input-wrapper {
+  position: relative;
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.reset-input {
+  width: 100%;
+  padding: 0.8rem 2.5rem 0.8rem 1rem; /* Más padding a la derecha para el ícono */
+  font-size: 1rem;
+  color: #333;
+  background-color: #f9f9f9;
+  border: 1px solid var(--color-borde-input);
+  border-radius: 8px;
+  box-sizing: border-box;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.reset-input::placeholder {
+  color: #999;
+}
+
+.reset-input:focus {
+  outline: none;
+  border-color: var(--color-principal);
+  box-shadow: 0 0 0 3px rgba(33, 13, 101, 0.2);
+}
+
+.eye-button {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 0.5rem;
+  cursor: pointer;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eye-button:hover {
+  color: var(--color-principal);
+}
+
+
+/* --- Botón de Acción --- */
+.reset-button {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  margin-top: 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--color-principal);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s, transform 0.2s;
+}
+
+.reset-button:hover:not(:disabled) {
+  background-color: var(--color-acento);
+  transform: translateY(-2px);
+}
+
+.reset-button:disabled {
+  background-color: #aaa;
+  cursor: not-allowed;
+}
+
+/* --- Mensajes de Estado --- */
+.feedback-message {
+  padding: 1rem;
+  margin-top: 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.feedback-message.loading {
+  color: var(--color-texto-secundario);
+}
+
+.feedback-message.error {
+  color: var(--color-error);
+  background-color: rgba(220, 53, 69, 0.1);
+  border-color: var(--color-error);
+}
+
+.feedback-message.success {
+  color: var(--color-exito);
+  background-color: rgba(40, 167, 69, 0.1);
+  border-color: var(--color-exito);
+}
+
+.feedback-message.error-inline {
+  color: var(--color-error);
+  background-color: transparent;
+  border: none;
+  text-align: left;
+  padding: 0.5rem 0 0 0;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  width: 100%;
+}

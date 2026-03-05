@@ -14,8 +14,7 @@ if (!WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
   throw new Error("Credenciales de WooCommerce no están definidas");
 }
 
-// --- Debug temporal (puedes borrar luego) ---
-console.log("✅ WC_URL:", WC_URL);
+
 
 // --- Cliente Axios para WooCommerce ---
 const wooApi = axios.create({
@@ -102,7 +101,7 @@ export async function getWooPricesByIds(ids) {
     const response = await wooApi.get("/products", {
       params: {
         include: validIds.join(","),
-        per_page: 100, 
+        per_page: 100,
         _fields: "id,price,regular_price,stock_quantity,manage_stock", // Precio y Stock
       },
     });
@@ -113,7 +112,7 @@ export async function getWooPricesByIds(ids) {
       const price = Number(p.price) || Number(p.regular_price) || 0;
       dataMap[p.id] = {
         price,
-        stock: p.manage_stock ? (p.stock_quantity || 0) : null 
+        stock: p.manage_stock ? (p.stock_quantity || 0) : null
       };
     });
 
@@ -145,9 +144,9 @@ export async function getWooDetailsByIds(ids) {
     const dataMap = {};
     response.data.forEach((p) => {
       dataMap[p.id] = {
-         categories: p.categories || [],
-         tags: p.tags || []
-         // Si brands viene en attributes, habría que procesarlo aqui, pero por ahora categories/tags es lo pedido
+        categories: p.categories || [],
+        tags: p.tags || []
+        // Si brands viene en attributes, habría que procesarlo aqui, pero por ahora categories/tags es lo pedido
       };
     });
 
@@ -160,22 +159,22 @@ export async function getWooDetailsByIds(ids) {
 
 // --- HELPER FETCH ALL ---
 async function fetchAllWoo(endpoint) {
-    let allData = [];
-    let page = 1;
-    let keepGoing = true;
+  let allData = [];
+  let page = 1;
+  let keepGoing = true;
 
-    while(keepGoing) {
-        const response = await wooApi.get(endpoint, {
-            params: { per_page: 100, page }
-        });
-        allData = allData.concat(response.data);
-        if (response.data.length < 100) {
-            keepGoing = false;
-        } else {
-            page++;
-        }
+  while (keepGoing) {
+    const response = await wooApi.get(endpoint, {
+      params: { per_page: 100, page }
+    });
+    allData = allData.concat(response.data);
+    if (response.data.length < 100) {
+      keepGoing = false;
+    } else {
+      page++;
     }
-    return allData;
+  }
+  return allData;
 }
 
 // --- CATEGORÍAS ---
@@ -207,16 +206,16 @@ export async function createCategory(data) {
 }
 
 export async function getProduct(id) {
-    try {
-        const response = await wooApi.get(`/products/${id}`);
-        return {
-            ok: true,
-            data: response.data
-        };
-    } catch (error) {
-        console.error("Error fetching product:", error.message);
-        throw error;
-    }
+  try {
+    const response = await wooApi.get(`/products/${id}`);
+    return {
+      ok: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error("Error fetching product:", error.message);
+    throw error;
+  }
 }
 
 // --- ETIQUETAS (TAGS) PARA MARCAS ---
@@ -286,20 +285,20 @@ export async function getSalesStats(period = "month") {
     // Si pedimos 'month', suele venir 1 objeto con el acumulado del mes, o array de dias si pedimos rango.
     // woocommerce /reports/sales devuelve array.
     if (response.data && response.data.length > 0) {
-        // Tomamos el último (o el sumatorio)
-        const report = response.data[0]; 
-        return {
-            total_sales: report.total_sales,
-            net_sales: report.net_sales,
-            average_sales: report.average_sales,
-            total_orders: report.total_orders,
-            total_items: report.total_items,
-        };
+      // Tomamos el último (o el sumatorio)
+      const report = response.data[0];
+      return {
+        total_sales: report.total_sales,
+        net_sales: report.net_sales,
+        average_sales: report.average_sales,
+        total_orders: report.total_orders,
+        total_items: report.total_items,
+      };
     }
     return null;
   } catch (error) {
     console.error("Error fetching sales reports:", error.message);
-    return null; 
+    return null;
   }
 }
 

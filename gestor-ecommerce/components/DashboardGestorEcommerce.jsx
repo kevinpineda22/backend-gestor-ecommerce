@@ -8,7 +8,7 @@ const CURRENCY = new Intl.NumberFormat("es-CO", {
   maximumFractionDigits: 0,
 });
 
-const DashboardGestorEcommerce = ({ setActiveTab }) => {
+const DashboardGestorEcommerce = ({ setActiveTab, sedeInfo }) => {
   const [data, setData] = useState({
     catalog: { total_products: 0, active_products: 0, draft_products: 0, missing_images: 0 },
     sales: { total_sales: 0, total_orders: 0 },
@@ -35,22 +35,22 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
   const handleSync = async () => {
     if (!window.confirm("¿Deseas escanear WooCommerce para importar nuevos productos?")) return;
-    
+
     setSyncing(true);
     try {
-        const res = await adoptWooProducts();
-        alert(`Sincronización completada.\nProcesados: ${res.processed}`);
-        loadDashboardData();
+      const res = await adoptWooProducts();
+      alert(`Sincronización completada.\nProcesados: ${res.processed}`);
+      loadDashboardData();
     } catch (e) {
-        alert("Error en sincronización: " + e.message);
+      alert("Error en sincronización: " + e.message);
     } finally {
-        setSyncing(false);
+      setSyncing(false);
     }
   };
 
   return (
     <div className="ge-dashboard">
-      <h2>Panel de Control - Gestor Ecommerce</h2>
+      <h2>Panel de Control{sedeInfo ? ` - ${sedeInfo.nombre}` : ''}</h2>
 
       {/* --- SECCIÓN 1: KPI COMERCIALES --- */}
       <div className="ge-section-title">Resumen Comercial (Mes Actual)</div>
@@ -70,18 +70,18 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
           </div>
           <div className="ge-stat-desc">Órdenes procesadas este mes</div>
         </div>
-        
+
         <div className="ge-stat-card">
           <h3>Ticket Promedio</h3>
           <div className="ge-stat-value">
-             {loading ? '...' : CURRENCY.format(data.sales.total_orders > 0 ? data.sales.total_sales / data.sales.total_orders : 0)}
+            {loading ? '...' : CURRENCY.format(data.sales.total_orders > 0 ? data.sales.total_sales / data.sales.total_orders : 0)}
           </div>
           <div className="ge-stat-desc">Promedio por pedido</div>
         </div>
       </div>
 
       {/* --- SECCIÓN 2: KPI CATÁLOGO --- */}
-      <div className="ge-section-title" style={{marginTop: '30px'}}>Estado del Catálogo</div>
+      <div className="ge-section-title" style={{ marginTop: '30px' }}>Estado del Catálogo</div>
       <div className="ge-stats-grid">
         <div className="ge-stat-card">
           <h3>Total Productos</h3>
@@ -93,7 +93,7 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
         <div className="ge-stat-card">
           <h3>Publicados</h3>
-          <div className="ge-stat-value" style={{color: '#10b981'}}>
+          <div className="ge-stat-value" style={{ color: '#10b981' }}>
             {loading ? '...' : data.catalog.active_products}
           </div>
           <div className="ge-stat-desc">Visibles en tienda</div>
@@ -101,7 +101,7 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
         <div className="ge-stat-card">
           <h3>Borradores</h3>
-          <div className="ge-stat-value" style={{color: '#f59e0b'}}>
+          <div className="ge-stat-value" style={{ color: '#f59e0b' }}>
             {loading ? '...' : data.catalog.draft_products}
           </div>
           <div className="ge-stat-desc">Ocultos / En revisión</div>
@@ -109,7 +109,7 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
         <div className="ge-stat-card">
           <h3>Sin Imagen</h3>
-           <div className="ge-stat-value" style={{color: data.catalog.missing_images > 0 ? '#ef4444' : '#6b7280'}}>
+          <div className="ge-stat-value" style={{ color: data.catalog.missing_images > 0 ? '#ef4444' : '#6b7280' }}>
             {loading ? '...' : data.catalog.missing_images}
           </div>
           <div className="ge-stat-desc">Requieren atención</div>
@@ -118,16 +118,16 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
 
       {/* Quick Actions Grid */}
-      <div className="ge-dashboard-actions" style={{marginTop: '40px'}}>
-        
+      <div className="ge-dashboard-actions">
+
         {/* Card: Sync */}
         <div className="ge-action-card">
           <h3>1. Sincronización</h3>
-          <p style={{color: '#6b7280', marginBottom: '20px'}}>
+          <p>
             Importa nuevos productos desde WooCommerce para gestionarlos en el sistema.
           </p>
-          <button 
-            className="ge-action-btn" 
+          <button
+            className="ge-action-btn"
             onClick={handleSync}
             disabled={syncing}
           >
@@ -138,10 +138,10 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
         {/* Card: Audit */}
         <div className="ge-action-card">
           <h3>2. Auditoría de Precios</h3>
-          <p style={{color: '#6b7280', marginBottom: '20px'}}>
+          <p>
             Compara precios y stock en tiempo real entre Siesa y WooCommerce.
           </p>
-          <button 
+          <button
             className="ge-action-btn secondary"
             onClick={() => setActiveTab('audit')}
           >
@@ -151,16 +151,16 @@ const DashboardGestorEcommerce = ({ setActiveTab }) => {
 
         {/* Card: Catalog */}
         <div className="ge-action-card">
-            <h3>3. Gestor de Catálogo</h3>
-            <p style={{color: '#6b7280', marginBottom: '20px'}}>
-                Administra tags, categorías y detalles de productos.
-            </p>
-            <button 
-                className="ge-action-btn secondary"
-                onClick={() => setActiveTab('catalog')}
-            >
-                📦 Ver Catálogo
-            </button>
+          <h3>3. Gestor de Catálogo</h3>
+          <p>
+            Administra tags, categorías y detalles de productos.
+          </p>
+          <button
+            className="ge-action-btn secondary"
+            onClick={() => setActiveTab('catalog')}
+          >
+            📦 Ver Catálogo
+          </button>
         </div>
 
       </div>

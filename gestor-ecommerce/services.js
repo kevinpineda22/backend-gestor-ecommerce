@@ -6,6 +6,11 @@ const API_URL = (typeof window !== "undefined" && (window.location.hostname === 
   ? LOCAL_API
   : PROD_API;
 
+export async function fetchSedes() {
+    const res = await fetch(`${API_URL}/catalog/sedes`);
+    return res.json();
+}
+
 export async function fetchDashboardStats() {
     const res = await fetch(`${API_URL}/catalog/dashboard-stats`);
     return res.json();
@@ -143,4 +148,66 @@ export async function deleteTag(id) {
 export async function fetchProductDetail(wooId) {
     const res = await fetch(`${API_URL}/catalog/product/${wooId}`);
     return res.json();
+}
+
+// --- BANNERS ---
+export async function fetchBanners(section = 'home_slider') {
+  const res = await fetch(`${API_URL}/content/banners?section=${section}`);
+  return res.json();
+}
+
+export async function createBanner(data) {
+  const res = await fetch(`${API_URL}/content/banners`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function updateBanner(id, data) {
+  const res = await fetch(`${API_URL}/content/banners/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function deleteBanner(id) {
+  const res = await fetch(`${API_URL}/content/banners/${id}`, {
+    method: "DELETE"
+  });
+  return res.json();
+}
+
+// --- REGLAS DE DESCUENTO ---
+export async function fetchDiscountRules() {
+  const res = await fetch(`${API_URL}/content/discounts`);
+  return res.json();
+}
+
+export async function createDiscountRule(data) {
+  const res = await fetch(`${API_URL}/content/discounts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function updateDiscountRule(id, data) {
+  const res = await fetch(`${API_URL}/content/discounts/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function deleteDiscountRule(id) {
+  const res = await fetch(`${API_URL}/content/discounts/${id}`, {
+    method: "DELETE"
+  });
+  return res.json();
 }

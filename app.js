@@ -18,4 +18,13 @@ app.get("/", (req, res) => {
   res.json({ status: "Gestor Ecommerce API OK" });
 });
 
+// ═══════ Global Error Handler ═══════
+app.use((err, req, res, _next) => {
+  console.error("❌ Unhandled Error:", err.message);
+  res.status(err.status || 500).json({
+    ok: false,
+    message: err.message || "Error interno del servidor",
+  });
+});
+
 export default app;

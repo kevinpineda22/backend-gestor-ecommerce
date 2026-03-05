@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./CatalogManager.css";
 
 export default function ProductEditModal({ 
@@ -28,22 +28,35 @@ export default function ProductEditModal({
   // Estado para URL Manual (Input controlado)
   const [manualUrl, setManualUrl] = useState("");
 
+  // Ref para saber si es la primera vez que se abre (evita reset de tab al enriquecer con Woo)
+  const prevProductId = useRef(null);
+
   // Inicializar estado local al abrir
   useEffect(() => {
     if (product) {
-      setLocalItem({
-        ...product,
-        // Asegurar arrays
-        categories: product.categories || [],
-        tags: product.tags || [],
-        brands: product.brands || [],
-        // Inicializar images (Soporte múltiple)
-        images: product.images && product.images.length > 0 
-            ? product.images 
-            : (product.image_url ? [product.image_url] : [])
+      const productKey = product.woo_product_id || product.item;
+      const isNewProduct = prevProductId.current !== productKey;
+
+      setLocalItem(prev => {
+        const base = isNewProduct ? product : { ...prev, ...product };
+        return {
+          ...base,
+          categories: product.categories || prev?.categories || [],
+          tags: product.tags || prev?.tags || [],
+          brands: product.brands || prev?.brands || [],
+          images: product.images && product.images.length > 0 
+              ? product.images 
+              : (prev?.images && prev.images.length > 0 ? prev.images : (product.image_url ? [product.image_url] : []))
+        };
       });
-      // Resetear vista
-      setActiveTab('general');
+
+      // Solo resetear tab cuando se abre un producto diferente
+      if (isNewProduct) {
+        setActiveTab('general');
+        prevProductId.current = productKey;
+      }
+    } else {
+      prevProductId.current = null;
     }
   }, [product]);
 
@@ -126,7 +139,7 @@ export default function ProductEditModal({
 
             {/* --- PESTAÑA 1: GENERAL --- */}
             {activeTab === 'general' && (
-                <div className="cm-tab-content fade-in">
+                <div key="tab-general" className="cm-tab-content fade-in">
                     <div className="cm-grid-2-col" style={{alignItems: 'start'}}>
                         {/* Columna Izquierda: Datos Básicos */}
                         <div>
@@ -190,11 +203,35 @@ export default function ProductEditModal({
                                 </div>
                                 {localItem.pum_qty && localItem.pum_unit && (
                                     <div style={{
-                                        marginTop: '8px', padding: '8px 12px', 
+                                        marginTop: '8px', padding: '10px 14px', 
                                         background: '#f0fdf4', border: '1px solid #bbf7d0', 
-                                        borderRadius: '6px', fontSize: '0.85rem', color: '#166534'
+                                        borderRadius: '8px', fontSize: '0.85rem', color: '#166534'
                                     }}>
-                                        ✅ PUM activo: se mostrará el precio por <strong>{localItem.pum_unit}</strong> en la tienda.
+                                        <div>✅ PUM activo: se mostrará el precio por <strong>{localItem.pum_unit}</strong> en la tienda.</div>
+                                        {localItem.woo_price > 0 && Number(localItem.pum_qty) > 0 && (
+                                            <div style={{
+                                                marginTop: '8px', padding: '8px 12px',
+                                                background: '#ecfdf5', borderRadius: '6px',
+                                                display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap'
+                                            }}>
+                                                <span style={{fontSize: '0.8rem', color: '#6b7280'}}>Cálculo:</span>
+                                                <span style={{fontWeight: 600}}>
+                                                    ${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(localItem.woo_price)}
+                                                </span>
+                                                <span style={{color: '#9ca3af'}}>÷</span>
+                                                <span style={{fontWeight: 600}}>
+                                                    {localItem.pum_qty} {localItem.pum_unit}
+                                                </span>
+                                                <span style={{color: '#9ca3af'}}>=</span>
+                                                <span style={{
+                                                    fontWeight: 700, fontSize: '1rem', color: '#059669',
+                                                    background: '#d1fae5', padding: '2px 8px', borderRadius: '4px'
+                                                }}>
+                                                    ${new Intl.NumberFormat('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(localItem.woo_price / Number(localItem.pum_qty))}
+                                                    /{localItem.pum_unit}
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -335,7 +372,7 @@ export default function ProductEditModal({
 
             {/* --- PESTAÑA 2: CLASIFICACIÓN --- */}
             {activeTab === 'classification' && (
-                <div className="cm-tab-content fade-in">
+                <div key="tab-classification" className="cm-tab-content fade-in">
                     
                     {/* 1. SECCIÓN SUPERIOR: SUGERENCIAS Y RESUMEN */}
                     <div className="cm-classification-grid-top">

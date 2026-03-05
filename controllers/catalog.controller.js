@@ -206,6 +206,16 @@ export async function createNewProduct(req, res) {
   }
 }
 
+export async function getSedes(req, res) {
+  try {
+    const result = await catalogService.getSedes();
+    return res.json(result);
+  } catch (err) {
+    console.error("getSedes error:", err);
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+}
+
 /**
  * Comparación LIVE Woo vs Siesa (precio + inventario)
  * REVERTIDO: Usa catalog.service.js (LIVE) en vez de audit.service.js (SNAPSHOT)

@@ -493,9 +493,9 @@ export async function createProductInWoo(data) {
       let initialPrice = data.price; // Fallback al del formulario
 
       try {
-          // Hardcodeado PV001 / P01 por solicitud expresa para MVP
-          const SEDE_INIT = "PV001";
-          const LISTA_INIT = "P01";
+          // Dinámico: usar sede/lista del request, fallback a PV001/P01
+          const SEDE_INIT = data.sede || "PV001";
+          const LISTA_INIT = data.lista || "P01";
           
           console.log(`🔌 Pre-cargando Siesa para ${data.sku} en ${SEDE_INIT}...`);
           
@@ -928,19 +928,33 @@ export async function adoptWooProducts() {
   };
 }
 
-export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
-  // 1️⃣ Mapeo sede → lista
-  const SEDE_LISTA = {
-    PV001: "P01",
-    "00201": "P02",
-    "00301": "P03",
-    "00401": "P04",
-    "00601": "P05",
-    "00701": "P06",
-    "00801": "P07"
-  };
+// =============================================
+// SEDES - Lectura de wc_sedes desde Supabase
+// =============================================
+export async function getSedes() {
+  const { data, error } = await supabase
+    .from("wc_sedes")
+    .select("id, nombre, slug, codigo_siesa, lista_precio")
+    .eq("activa", true)
+    .order("nombre");
 
-  const lista = SEDE_LISTA[sede] ?? "GRAL";
+  if (error) throw new Error("Error consultando sedes: " + error.message);
+  return { ok: true, sedes: data };
+}
+
+export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
+  // 1️⃣ Mapeo sede → lista dinámico desde wc_sedes
+  const { data: sedesData } = await supabase
+    .from("wc_sedes")
+    .select("codigo_siesa, lista_precio")
+    .eq("activa", true);
+
+  const sedeMap = {};
+  if (sedesData) {
+    sedesData.forEach(s => { sedeMap[s.codigo_siesa] = s.lista_precio; });
+  }
+
+  const lista = sedeMap[sede] ?? "GRAL";
 
   // 2️⃣ Query base ecommerce_products
   let query = supabase

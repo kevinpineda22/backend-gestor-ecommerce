@@ -58,3 +58,62 @@ export async function deleteBanner(id) {
         return { ok: false, message: e.message };
     }
 }
+
+// --- SERVICIO DE REGLAS DE DESCUENTO ---
+
+export async function getDiscountRules() {
+    try {
+        const { data, error } = await supabase
+            .from('discount_rules')
+            .select('*')
+            .order('display_order', { ascending: true });
+
+        if (error) throw error;
+        return { ok: true, data };
+    } catch (e) {
+        console.error("Error getDiscountRules:", e);
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function createDiscountRule(ruleData) {
+    try {
+        const { data, error } = await supabase
+            .from('discount_rules')
+            .insert([ruleData])
+            .select();
+
+        if (error) throw error;
+        return { ok: true, data };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function updateDiscountRule(id, updates) {
+    try {
+        const { error } = await supabase
+            .from('discount_rules')
+            .update(updates)
+            .eq('id', id);
+
+        if (error) throw error;
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function deleteDiscountRule(id) {
+    try {
+        const { error } = await supabase
+            .from('discount_rules')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}

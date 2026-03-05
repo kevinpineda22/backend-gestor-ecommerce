@@ -26,3 +26,10 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# Cache data (generated at runtime)
+data/cache_*.json
+
+# Test/debug scripts (keep locally, don't deploy)
+test_*.js
+check_*.js
