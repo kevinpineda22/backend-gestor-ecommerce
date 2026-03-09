@@ -41,6 +41,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncSedes, setSyncSedes] = useState(Object.keys(SEDE_WP_URLS));
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState([]);
   const [searchingProducts, setSearchingProducts] = useState(false);
@@ -134,32 +136,32 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     }));
   };
 
+  const SEDE_LABELS = { 'PV001': 'Copacabana (Principal)', '00301': 'Girardota', '00701': 'Barbosa', '00201': 'Villahermosa' };
+
+  const toggleSyncSede = (code) => {
+    setSyncSedes(prev => prev.includes(code) ? prev.filter(s => s !== code) : [...prev, code]);
+  };
+
   // --- Sincronizar reglas a WordPress (FlyCart) ---
   const handleSyncToWP = async () => {
+    const activeRules = rules.filter(r => r.active);
+    if (activeRules.length === 0) {
+      alert("No hay reglas activas para sincronizar.");
+      return;
+    }
+    if (syncSedes.length === 0) {
+      alert("Selecciona al menos una sede.");
+      return;
+    }
+
     setSyncing(true);
+    setShowSyncModal(false);
     try {
-      const activeRules = rules.filter(r => r.active);
-      if (activeRules.length === 0) {
-        alert("No hay reglas activas para sincronizar.");
-        setSyncing(false);
-        return;
-      }
-
-      if (replaceAll) {
-        const confirmed = confirm(
-          `⚠️ MODO REEMPLAZO TOTAL\n\n` +
-          `Esto eliminará TODAS las reglas existentes en FlyCart (incluidas las creadas manualmente) ` +
-          `y las reemplazará con las ${activeRules.length} reglas del Gestor.\n\n` +
-          `El Gestor será la ÚNICA fuente de verdad.\n\n¿Continuar?`
-        );
-        if (!confirmed) { setSyncing(false); return; }
-      }
-
-      const urls = Object.entries(SEDE_WP_URLS);
       const results = [];
-      for (const [code, url] of urls) {
+      for (const code of syncSedes) {
+        const url = SEDE_WP_URLS[code];
         try {
-          const r = await syncDiscountRulesToWP(url, activeRules, replaceAll);
+          const r = await syncDiscountRulesToWP(url, activeRules);
           results.push({ code, ok: r.ok, synced: r.synced || 0 });
         } catch {
           results.push({ code, ok: false, synced: 0 });
@@ -167,14 +169,11 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       }
       const ok = results.filter(r => r.ok);
       const fail = results.filter(r => !r.ok);
+      const sedeNames = ok.map(r => SEDE_LABELS[r.code] || r.code).join(', ');
       if (fail.length === 0) {
-        alert(
-          replaceAll
-            ? `✅ Se reemplazaron TODAS las reglas en las ${ok.length} sedes.\n${activeRules.length} reglas del Gestor ahora son las únicas activas.`
-            : `✅ ${activeRules.length} reglas sincronizadas en las ${ok.length} sedes.\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`
-        );
+        alert(`✅ ${activeRules.length} reglas sincronizadas en ${ok.length} sede(s):\n${sedeNames}\n\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`);
       } else {
-        alert(`⚠️ Sincronizado en ${ok.length} de ${urls.length} sedes.\n${fail.length} fallaron: ${fail.map(f => f.code).join(', ')}`);
+        alert(`⚠️ Sincronizado en ${ok.length} de ${syncSedes.length} sedes.\n${fail.length} fallaron: ${fail.map(f => SEDE_LABELS[f.code] || f.code).join(', ')}`);
       }
     } catch (err) {
       alert("Error sincronizando: " + err.message);
@@ -349,13 +348,38 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
             </button>
           )}
           {rules.length > 0 && (
-            <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing}>
-              {syncing ? "Sincronizando..." : "\ud83d\udd04 Sincronizar con WP"}
+            <button className="ge-btn accent" onClick={() => setShowSyncModal(true)} disabled={syncing}>
+              {syncing ? "Sincronizando..." : "🔄 Sincronizar con WP"}
             </button>
           )}
           <button className="ge-btn" onClick={openCreate}>+ Nueva Regla</button>
         </div>
       </div>
+
+      {/* Modal de sincronización - Seleccionar sedes */}
+      {showSyncModal && (
+        <div className="ge-card pad" style={{marginBottom: 16, borderLeft: '4px solid var(--ge-accent)'}}>
+          <h3 style={{margin: '0 0 8px', color: 'var(--ge-text-dark)'}}>🔄 Sincronizar con WordPress</h3>
+          <p className="ge-row-subtitle" style={{marginBottom: 12}}>
+            Selecciona las sedes donde quieres enviar las {rules.filter(r => r.active).length} reglas activas.
+            Las reglas con prefijo [MK-Gestor] anteriores serán reemplazadas.
+          </p>
+          <div className="ge-row-meta" style={{marginBottom: 12, gap: 8}}>
+            {Object.keys(SEDE_WP_URLS).map(code => (
+              <label key={code} className="ge-form-check" style={{fontSize: 13}}>
+                <input type="checkbox" checked={syncSedes.includes(code)} onChange={() => toggleSyncSede(code)} />
+                {SEDE_LABELS[code] || code}
+              </label>
+            ))}
+          </div>
+          <div className="ge-form-actions">
+            <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing || syncSedes.length === 0}>
+              {syncing ? "Sincronizando..." : `🔄 Sincronizar en ${syncSedes.length} sede(s)`}
+            </button>
+            <button className="ge-btn secondary" onClick={() => setShowSyncModal(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {/* Panel de importación desde WooCommerce */}
       {importPreview && (
