@@ -120,65 +120,189 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
           <h2>Auditoría de Precios VR</h2>
           <p>Comparativa en tiempo real SIESA vs WooCommerce</p>
         </div>
+      </div>
 
-        <div className="ge-controls" style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', width: '100%', justifyContent: 'flex-end', marginTop: '12px' }}>
-          <button
-            className="ge-btn"
-            onClick={handleAdopt}
-            disabled={syncing}
-            style={{ backgroundColor: syncing ? '#9ca3af' : '#059669' }}
-          >
-            {syncing ? "Sincronizando..." : "📥 Importar de Woo"}
-          </button>
+      {/* ── Toolbar: Sede + Search + Import ── */}
+      <div style={{
+        background: 'var(--ge-bg-white)',
+        borderRadius: 'var(--ge-radius-xl)',
+        border: '1px solid var(--ge-border)',
+        padding: '20px 24px',
+        marginBottom: '20px',
+        boxShadow: 'var(--ge-shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Sede selector / badge */}
+          <div style={{ flex: '0 0 auto' }}>
+            {esAdminGlobal && sedes.length > 1 ? (
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', top: '-8px', left: '12px', background: 'var(--ge-bg-white)', padding: '0 6px', fontSize: '0.68rem', fontWeight: 600, color: 'var(--ge-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sede</span>
+                <select
+                  className="ge-select"
+                  value={sedeInfo?.id || ''}
+                  onChange={(e) => onSedeChange(e.target.value)}
+                  style={{ minWidth: '200px', borderColor: 'var(--ge-primary)', borderWidth: '2px', fontWeight: 600, paddingRight: '32px' }}
+                >
+                  {sedes.map(s => (
+                    <option key={s.id} value={s.id}>{s.nombre} ({s.codigo_siesa})</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div style={{
+                padding: '10px 18px',
+                background: 'var(--ge-primary-light)',
+                borderRadius: 'var(--ge-radius)',
+                border: '2px solid var(--ge-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '1rem' }}>🏪</span>
+                <div>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--ge-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Sede</div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--ge-primary-dark)' }}>{sedeInfo?.nombre || 'Sede'}</div>
+                </div>
+              </div>
+            )}
+          </div>
 
-          {esAdminGlobal && sedes.length > 1 ? (
-            <select
-              className="ge-select"
-              value={sedeInfo?.id || ''}
-              onChange={(e) => onSedeChange(e.target.value)}
-              style={{ minWidth: '150px' }}
-            >
-              {sedes.map(s => (
-                <option key={s.id} value={s.id}>{s.nombre} ({s.codigo_siesa})</option>
-              ))}
-            </select>
-          ) : (
-            <span style={{ padding: '8px 16px', background: '#f3f4f6', borderRadius: '6px', fontSize: '0.9rem', fontWeight: 600 }}>
-              {sedeInfo?.nombre || 'Sede'}
-            </span>
-          )}
+          {/* Divider */}
+          <div style={{ width: '1px', height: '36px', background: 'var(--ge-border)', flexShrink: 0 }} />
 
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', flex: '1 1 auto', minWidth: '200px' }}>
-            <input
-              className="ge-input"
-              type="text"
-              placeholder="Buscar Item..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ flex: 1, minWidth: 0 }}
-            />
-            <button type="submit" className="ge-btn secondary">
+          {/* Search */}
+          <form onSubmit={handleSearch} style={{ display: 'flex', gap: '0', flex: '1 1 300px', minWidth: '200px' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.9rem', color: 'var(--ge-text-light)', pointerEvents: 'none' }}>🔍</span>
+              <input
+                className="ge-input"
+                type="text"
+                placeholder="Buscar por Item o SKU..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ paddingLeft: '36px', borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' }}
+              />
+            </div>
+            <button type="submit" className="ge-btn" style={{
+              borderTopLeftRadius: 0,
+              borderBottomLeftRadius: 0,
+              padding: '9px 20px',
+              background: 'var(--ge-primary)',
+              fontWeight: 600,
+              letterSpacing: '0.02em'
+            }}>
               Buscar
             </button>
           </form>
+
+          {/* Import button */}
+          <button
+            className="ge-btn accent"
+            onClick={handleAdopt}
+            disabled={syncing}
+            style={{ padding: '10px 20px', fontWeight: 600, boxShadow: syncing ? 'none' : '0 2px 8px rgba(139, 213, 0, 0.3)' }}
+          >
+            {syncing ? "⏳ Sincronizando..." : "📥 Importar de Woo"}
+          </button>
         </div>
       </div>
 
-      <div className="ge-stats-grid" style={{ marginBottom: '24px' }}>
-        <div className={`ge-stat-card filter-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => handleFilterClick('all')} style={{ cursor: 'pointer' }}>
-          <h3>Todos</h3>
-          <div className="ge-stat-value" style={{ fontSize: '1.8rem' }}>—</div>
-          <div className="ge-stat-desc">Vista sin filtros y datos crudos</div>
+      {/* ── Filter Cards ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '16px',
+        marginBottom: '24px'
+      }}>
+        {/* Card: Todos */}
+        <div
+          onClick={() => handleFilterClick('all')}
+          style={{
+            background: filterType === 'all' ? 'var(--ge-primary)' : 'var(--ge-bg-white)',
+            borderRadius: 'var(--ge-radius-lg)',
+            border: filterType === 'all' ? '2px solid var(--ge-primary)' : '2px solid var(--ge-border)',
+            padding: '20px 24px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: filterType === 'all' ? '0 4px 12px rgba(33, 13, 101, 0.2)' : 'var(--ge-shadow-sm)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px'
+          }}
+        >
+          <div style={{
+            width: '48px', height: '48px', borderRadius: '12px',
+            background: filterType === 'all' ? 'rgba(255,255,255,0.2)' : 'var(--ge-primary-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1.3rem', flexShrink: 0
+          }}>📋</div>
+          <div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: filterType === 'all' ? 'rgba(255,255,255,0.8)' : 'var(--ge-text-muted)', marginBottom: '2px' }}>Todos</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: filterType === 'all' ? '#fff' : 'var(--ge-text-dark)' }}>{rawData.length}</div>
+            <div style={{ fontSize: '0.75rem', color: filterType === 'all' ? 'rgba(255,255,255,0.65)' : 'var(--ge-text-light)' }}>Vista sin filtros</div>
+          </div>
         </div>
-        <div className={`ge-stat-card filter-card ${filterType === 'diff' ? 'active' : ''}`} onClick={() => handleFilterClick('diff')} style={{ cursor: 'pointer' }}>
-          <h3 style={{ color: 'var(--ge-warning)' }}>⚠️ Diferencias</h3>
-          <div className="ge-stat-value" style={{ color: 'var(--ge-warning)', fontSize: '1.8rem' }}>!</div>
-          <div className="ge-stat-desc">Items que requieren sincronización</div>
+
+        {/* Card: Diferencias */}
+        <div
+          onClick={() => handleFilterClick('diff')}
+          style={{
+            background: filterType === 'diff' ? 'var(--ge-warning)' : 'var(--ge-bg-white)',
+            borderRadius: 'var(--ge-radius-lg)',
+            border: filterType === 'diff' ? '2px solid var(--ge-warning)' : '2px solid var(--ge-border)',
+            padding: '20px 24px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: filterType === 'diff' ? '0 4px 12px rgba(245, 158, 11, 0.25)' : 'var(--ge-shadow-sm)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px'
+          }}
+        >
+          <div style={{
+            width: '48px', height: '48px', borderRadius: '12px',
+            background: filterType === 'diff' ? 'rgba(255,255,255,0.25)' : 'var(--ge-warning-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1.3rem', flexShrink: 0
+          }}>⚠️</div>
+          <div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: filterType === 'diff' ? 'rgba(255,255,255,0.85)' : 'var(--ge-warning)', marginBottom: '2px' }}>Diferencias</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: filterType === 'diff' ? '#fff' : 'var(--ge-text-dark)' }}>
+              {rawData.filter(r => r.price_status !== 'OK').length}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: filterType === 'diff' ? 'rgba(255,255,255,0.65)' : 'var(--ge-text-light)' }}>Requieren sincronización</div>
+          </div>
         </div>
-        <div className={`ge-stat-card filter-card ${filterType === 'ok' ? 'active' : ''}`} onClick={() => handleFilterClick('ok')} style={{ cursor: 'pointer' }}>
-          <h3 style={{ color: 'var(--ge-success)' }}>✅ Completados</h3>
-          <div className="ge-stat-value" style={{ color: 'var(--ge-success)', fontSize: '1.8rem' }}>✓</div>
-          <div className="ge-stat-desc">Items sincronizados correctamente</div>
+
+        {/* Card: Completados */}
+        <div
+          onClick={() => handleFilterClick('ok')}
+          style={{
+            background: filterType === 'ok' ? 'var(--ge-success)' : 'var(--ge-bg-white)',
+            borderRadius: 'var(--ge-radius-lg)',
+            border: filterType === 'ok' ? '2px solid var(--ge-success)' : '2px solid var(--ge-border)',
+            padding: '20px 24px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: filterType === 'ok' ? '0 4px 12px rgba(16, 185, 129, 0.25)' : 'var(--ge-shadow-sm)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px'
+          }}
+        >
+          <div style={{
+            width: '48px', height: '48px', borderRadius: '12px',
+            background: filterType === 'ok' ? 'rgba(255,255,255,0.25)' : 'var(--ge-success-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1.3rem', flexShrink: 0
+          }}>✅</div>
+          <div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: filterType === 'ok' ? 'rgba(255,255,255,0.85)' : 'var(--ge-success)', marginBottom: '2px' }}>Sincronizados</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: filterType === 'ok' ? '#fff' : 'var(--ge-text-dark)' }}>
+              {rawData.filter(r => r.price_status === 'OK').length}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: filterType === 'ok' ? 'rgba(255,255,255,0.65)' : 'var(--ge-text-light)' }}>Items correctos</div>
+          </div>
         </div>
       </div>
 
@@ -262,20 +386,33 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
         </div>
       </div>
 
-      <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{
+        marginTop: '20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        background: 'var(--ge-bg-white)',
+        padding: '12px 20px',
+        borderRadius: 'var(--ge-radius-lg)',
+        border: '1px solid var(--ge-border)',
+        boxShadow: 'var(--ge-shadow-sm)'
+      }}>
         <button
           disabled={page === 1}
           onClick={() => setPage(p => p - 1)}
-          className="ge-btn"
-          style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
+          className="ge-btn secondary"
+          style={{ padding: '8px 18px', fontWeight: 600 }}
         >
-          Anterior
+          ← Anterior
         </button>
-        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Página {page} - {totalItemsDb ? `Total DB: ${totalItemsDb}` : ''}</span>
+        <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ge-text-muted)' }}>
+          Página <span style={{ color: 'var(--ge-primary)', fontWeight: 700 }}>{page}</span>
+          {totalItemsDb ? <span> · {totalItemsDb} items en DB</span> : ''}
+        </span>
         <button
           onClick={() => setPage(p => p + 1)}
           className="ge-btn"
-          style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
+          style={{ padding: '8px 18px', fontWeight: 600 }}
         >
           Siguiente
         </button>
