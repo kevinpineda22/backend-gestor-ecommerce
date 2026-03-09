@@ -774,33 +774,17 @@ add_action('rest_api_init', function() {
                 ), 200);
             }
 
-            $body = $request->get_json_params();
-
-            // Soportar formato {rules: [...], replace_all: true} o array directo
-            if (isset($body['rules']) && is_array($body['rules'])) {
-                $rules = $body['rules'];
-                $replace_all = !empty($body['replace_all']);
-            } else {
-                $rules = $body;
-                $replace_all = false;
-            }
-
+            $rules = $request->get_json_params();
             if (empty($rules) || !is_array($rules)) {
                 return new WP_REST_Response(array('ok' => false, 'message' => 'No se recibieron reglas'), 200);
             }
 
-            // PASO 1: Eliminar reglas según modo
-            if ($replace_all) {
-                // Modo REEMPLAZAR TODO: elimina TODAS las reglas de FlyCart
-                // Esto convierte al Gestor en la única fuente de verdad
-                $wpdb->query("DELETE FROM {$table}");
-            } else {
-                // Modo normal: solo elimina las del Gestor (prefijo [MK-Gestor])
-                $wpdb->query($wpdb->prepare(
-                    "DELETE FROM {$table} WHERE title LIKE %s",
-                    $prefix . '%'
-                ));
-            }
+            // PASO 1: Eliminar TODAS las reglas previas del Gestor (prefijo [MK-Gestor])
+            // Esto garantiza que reglas eliminadas/desactivadas no queden huérfanas
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM {$table} WHERE title LIKE %s",
+                $prefix . '%'
+            ));
 
             // PASO 2: Insertar todas las reglas activas con el prefijo
             $synced = 0;
@@ -837,10 +821,7 @@ add_action('rest_api_init', function() {
                 'synced' => $synced,
                 'deleted_old' => true,
                 'errors' => $errors,
-                'replace_all' => isset($replace_all) ? $replace_all : false,
-                'message' => $replace_all
-                    ? "Se reemplazaron TODAS las reglas. {$synced} reglas del Gestor sincronizadas."
-                    : "Se sincronizaron {$synced} reglas. Las reglas anteriores del Gestor fueron reemplazadas."
+                'message' => "Se sincronizaron {$synced} reglas. Las reglas anteriores del Gestor fueron reemplazadas."
             ), 200);
         },
         'permission_callback' => function($request) {
@@ -857,12 +838,8 @@ add_action('rest_api_init', function() {
             $table = $wpdb->prefix . 'wdr_rules';
             $prefix = '[MK-Gestor] ';
             $title = $request->get_param('title');
-            $purge_all = $request->get_param('purge_all');
 
-            if (!empty($purge_all)) {
-                // purge_all = eliminar ABSOLUTAMENTE TODAS las reglas de FlyCart
-                $deleted = $wpdb->query("DELETE FROM {$table}");
-            } elseif (empty($title)) {
+            if (empty($title)) {
                 // Sin título = eliminar TODAS las reglas del Gestor
                 $deleted = $wpdb->query($wpdb->prepare(
                     "DELETE FROM {$table} WHERE title LIKE %s",
