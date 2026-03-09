@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
-
+import "./BannerManager.css";
 const SECTIONS = [
   { key: "home_slider", label: "🖼️ Slider Principal", desc: "Banner grande rotativo del inicio" },
   { key: "home_tiles", label: "🏷️ Tiles Promocionales", desc: "Cuadros pequeños debajo del slider" },
@@ -21,6 +21,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
   const [importFilter, setImportFilter] = useState('all');
   const [sedeFilter, setSedeFilter] = useState('all'); // 'all' | 'global' | codigo_sede
   const [importSede, setImportSede] = useState(sedeActual || 'PV001');
+  const [showPreview, setShowPreview] = useState(false);
 
   // Form state
   const [form, setForm] = useState({
@@ -54,15 +55,24 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
     .filter(b => b.section === activeSection)
     .filter(b => {
       if (sedeFilter === 'all') return true;
-      if (sedeFilter === 'global') return !b.sedes;
+      if (sedeFilter === 'global') return !b.sedes || b.sedes.length === 0;
       return b.sedes && b.sedes.includes(sedeFilter);
     })
+    .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
+  // Para Storefront Preview
+  const previewSliders = allBanners
+    .filter(b => b.section === 'home_slider' && b.active && (sedeFilter === 'all' || (sedeFilter === 'global' ? (!b.sedes || b.sedes.length === 0) : b.sedes?.includes(sedeFilter))))
+    .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
+  const previewTiles = allBanners
+    .filter(b => b.section === 'home_tiles' && b.active && (sedeFilter === 'all' || (sedeFilter === 'global' ? (!b.sedes || b.sedes.length === 0) : b.sedes?.includes(sedeFilter))))
     .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
 
   // Conteos por sede para badges
   const bannersInSection = allBanners.filter(b => b.section === activeSection);
   const sedeCountAll = bannersInSection.length;
-  const sedeCountGlobal = bannersInSection.filter(b => !b.sedes).length;
+  const sedeCountGlobal = bannersInSection.filter(b => !b.sedes || b.sedes.length === 0).length;
 
   const resetForm = () => {
     setForm({ title: "", image_url: "", link_url: "", active: true, display_order: 0, section: activeSection, sedes: null });
@@ -236,7 +246,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
           <p>Administra los sliders y promociones de la tienda</p>
         </div>
         <div className="ge-header-actions">
-          <select className="ge-input ge-input-sm" value={importSede} onChange={e => setImportSede(e.target.value)} style={{width:'auto'}}>
+          <select className="ge-input ge-input-sm" value={importSede} onChange={e => setImportSede(e.target.value)} style={{ width: 'auto' }}>
             {Object.entries(SEDE_WP_URLS).map(([code]) => (
               <option key={code} value={code}>{getSedeLabel(code)}</option>
             ))}
@@ -262,7 +272,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
             {importPreview.sources?.media_library && ' ✅ Media Library'}
           </p>
 
-          <div className="ge-row-meta" style={{marginBottom: 16}}>
+          <div className="ge-row-meta" style={{ marginBottom: 16 }}>
             {['all', 'revslider', 'woo_category', 'media_library'].map(f => {
               const count = f === 'all' ? importBanners.length : importBanners.filter(b => b.source === f).length;
               if (f !== 'all' && count === 0) return null;
@@ -305,6 +315,83 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
         </div>
       )}
 
+      {/* Filtro por sede movido arriba para que afecte el Preview */}
+      <div className="bm-filter-bar" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        {sedes.length > 1 ? (
+          <div className="ge-row-meta">
+            <span className="ge-form-label" style={{ marginBottom: 0, marginRight: 8, fontSize: '0.95rem' }}>📍 Vista Sede:</span>
+            {[{ key: 'all', label: 'Todas', count: sedeCountAll }, { key: 'global', label: '🌐 Globales', count: sedeCountGlobal }].map(f => (
+              <button key={f.key} className={`ge-pill ${sedeFilter === f.key ? 'active' : ''}`} onClick={() => setSedeFilter(f.key)}>
+                {f.label} ({f.count})
+              </button>
+            ))}
+            {sedes.map(s => {
+              const code = s.codigo_siesa || s.slug;
+              const count = bannersInSection.filter(b => b.sedes && b.sedes.includes(code)).length;
+              return (
+                <button key={code} className={`ge-pill ${sedeFilter === code ? 'active-accent' : ''}`} onClick={() => setSedeFilter(code)}>
+                  {s.nombre} ({count})
+                </button>
+              );
+            })}
+          </div>
+        ) : <div />}
+
+        <button
+          className={`bm-preview-toggle-btn ${showPreview ? 'active' : ''}`}
+          onClick={() => setShowPreview(!showPreview)}
+        >
+          {showPreview ? '👁️ Ocultar Vista Previa' : '👁️ Ver Vista Previa Real'}
+        </button>
+      </div>
+
+      {/* Vista Previa Storefront */}
+      {showPreview && (
+        <div className="bm-storefront-preview">
+          <div className="bm-storefront-header">
+            👁️ Vista Previa de Tienda Virtual
+            <span className="bm-storefront-header-subtitle">
+              Mostrando estructura activa para {sedeFilter === 'all' ? 'Todas las sedes' : sedeFilter === 'global' ? '🌐 Globales' : getSedeLabel(sedeFilter)}
+            </span>
+          </div>
+          <div className="bm-storefront-layout">
+            <div className="bm-storefront-main">
+              {/* Slider */}
+              <div className="bm-storefront-slider">
+                {previewSliders.length > 0 ? (
+                  <>
+                    <img src={previewSliders[0].image_url} alt="Slider Activo" />
+                    {previewSliders.length > 1 && (
+                      <div style={{ position: 'absolute', bottom: 12, right: 12, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '4px 12px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 600 }}>
+                        1 / {previewSliders.length}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="bm-storefront-slider-empty">No hay Slider activo configurado en esta sede</div>
+                )}
+              </div>
+
+              {/* Tiles */}
+              <div className="bm-storefront-tiles">
+                {[0, 1, 2, 3].map(i => {
+                  const tile = previewTiles[i];
+                  return (
+                    <div key={i} className="bm-storefront-tile">
+                      {tile ? (
+                        <img src={tile.image_url} alt={`Tile ${i + 1}`} />
+                      ) : (
+                        <div className="bm-storefront-tile-empty">Espacio {i + 1}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs de sección */}
       <div className="ge-tabs">
         {SECTIONS.map(sec => (
@@ -325,8 +412,8 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
 
       {/* Formulario */}
       {showForm && (
-        <div className="ge-card pad" style={{marginBottom: 24}}>
-          <h3 className="ge-import-title" style={{color: 'var(--ge-text-dark)'}}>
+        <div className="ge-card pad" style={{ marginBottom: 24 }}>
+          <h3 className="ge-import-title" style={{ color: 'var(--ge-text-dark)' }}>
             {editingBanner ? "Editar Banner" : `Nuevo Banner — ${sectionInfo?.label || activeSection}`}
           </h3>
 
@@ -344,7 +431,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
 
             <div className="ge-form-group">
               <label>Imagen del Banner</label>
-              <div className="ge-form-help" style={{marginBottom: 8}}>
+              <div className="ge-form-help" style={{ marginBottom: 8 }}>
                 {form.section === 'home_slider'
                   ? '📐 Tamaño recomendado: 1200×800px (proporción 3:2). Mínimo 1200px de ancho.'
                   : '📐 Tamaño recomendado: 600×800px (proporción 3:4, vertical). Mínimo 450px de ancho.'}
@@ -354,7 +441,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
                   <input type="file" accept="image/*" onChange={handleImageUpload} disabled={uploading} />
                   {uploading && <span className="ge-form-help">Subiendo...</span>}
                   {form.image_url && (
-                    <input className="ge-input ge-input-sm" style={{marginTop: 8}} value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="O pega URL directamente" />
+                    <input className="ge-input ge-input-sm" style={{ marginTop: 8 }} value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="O pega URL directamente" />
                   )}
                 </div>
                 {form.image_url && <img src={form.image_url} alt="Preview" className="ge-upload-preview" />}
@@ -367,7 +454,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
               </label>
               <div className="ge-form-check">
                 <span>Orden:</span>
-                <input type="number" className="ge-input ge-input-sm" style={{width: 60}} value={form.display_order} onChange={e => setForm(f => ({ ...f, display_order: Number(e.target.value) }))} />
+                <input type="number" className="ge-input ge-input-sm" style={{ width: 60 }} value={form.display_order} onChange={e => setForm(f => ({ ...f, display_order: Number(e.target.value) }))} />
               </div>
             </div>
 
@@ -410,27 +497,6 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
               <button className="ge-btn secondary" onClick={resetForm}>Cancelar</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Filtro por sede */}
-      {sedes.length > 1 && (
-        <div className="ge-row-meta" style={{marginBottom: 16}}>
-          <span className="ge-form-label" style={{marginBottom: 0, marginRight: 4}}>Filtrar por sede:</span>
-          {[{ key: 'all', label: 'Todas', count: sedeCountAll }, { key: 'global', label: '🌐 Globales', count: sedeCountGlobal }].map(f => (
-            <button key={f.key} className={`ge-pill ${sedeFilter === f.key ? 'active' : ''}`} onClick={() => setSedeFilter(f.key)}>
-              {f.label} ({f.count})
-            </button>
-          ))}
-          {sedes.map(s => {
-            const code = s.codigo_siesa || s.slug;
-            const count = bannersInSection.filter(b => b.sedes && b.sedes.includes(code)).length;
-            return (
-              <button key={code} className={`ge-pill ${sedeFilter === code ? 'active-accent' : ''}`} onClick={() => setSedeFilter(code)}>
-                📍 {s.nombre} ({count})
-              </button>
-            );
-          })}
         </div>
       )}
 

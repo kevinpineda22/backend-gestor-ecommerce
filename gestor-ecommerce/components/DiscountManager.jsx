@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { fetchDiscountRules, createDiscountRule, updateDiscountRule, deleteDiscountRule, fetchCategories, syncDiscountRulesToWP, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
-
+import "./DiscountManager.css";
 const DAYS = [
   { value: 1, label: "Lunes" },
   { value: 2, label: "Martes" },
@@ -358,15 +358,15 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
 
       {/* Modal de sincronización - Seleccionar sedes */}
       {showSyncModal && (
-        <div className="ge-card pad" style={{marginBottom: 16, borderLeft: '4px solid var(--ge-accent)'}}>
-          <h3 style={{margin: '0 0 8px', color: 'var(--ge-text-dark)'}}>🔄 Sincronizar con WordPress</h3>
-          <p className="ge-row-subtitle" style={{marginBottom: 12}}>
+        <div className="ge-card pad" style={{ marginBottom: 16, borderLeft: '4px solid var(--ge-accent)' }}>
+          <h3 style={{ margin: '0 0 8px', color: 'var(--ge-text-dark)' }}>🔄 Sincronizar con WordPress</h3>
+          <p className="ge-row-subtitle" style={{ marginBottom: 12 }}>
             Selecciona las sedes donde quieres enviar las {rules.filter(r => r.active).length} reglas activas.
             Las reglas con prefijo [MK-Gestor] anteriores serán reemplazadas.
           </p>
-          <div className="ge-row-meta" style={{marginBottom: 12, gap: 8}}>
+          <div className="ge-row-meta" style={{ marginBottom: 12, gap: 8 }}>
             {Object.keys(SEDE_WP_URLS).map(code => (
-              <label key={code} className="ge-form-check" style={{fontSize: 13}}>
+              <label key={code} className="ge-form-check" style={{ fontSize: 13 }}>
                 <input type="checkbox" checked={syncSedes.includes(code)} onChange={() => toggleSyncSede(code)} />
                 {SEDE_LABELS[code] || code}
               </label>
@@ -454,8 +454,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
 
       {/* Formulario crear/editar */}
       {showForm && (
-        <div className="ge-card pad" style={{marginBottom: 24}}>
-          <h3 className="ge-import-title" style={{color: 'var(--ge-text-dark)'}}>
+        <div className="ge-card pad" style={{ marginBottom: 24 }}>
+          <h3 className="ge-import-title" style={{ color: 'var(--ge-text-dark)' }}>
             {editingRule ? "Editar Regla" : "Nueva Regla de Descuento"}
           </h3>
 
@@ -489,8 +489,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
               </select>
 
               {form.applies_to === "categories" && (
-                <div style={{marginTop: 8}}>
-                  <div className="ge-row-meta" style={{marginBottom: 8}}>
+                <div style={{ marginTop: 8 }}>
+                  <div className="ge-row-meta" style={{ marginBottom: 8 }}>
                     {form.applies_to_names.map((name, idx) => (
                       <span key={idx} className="ge-chip category">
                         {name}
@@ -514,8 +514,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
               )}
 
               {form.applies_to === "products" && (
-                <div style={{marginTop: 8}}>
-                  <div className="ge-row-meta" style={{marginBottom: 8}}>
+                <div style={{ marginTop: 8 }}>
+                  <div className="ge-row-meta" style={{ marginBottom: 8 }}>
                     {form.applies_to_names.map((name, idx) => (
                       <span key={idx} className="ge-chip product">
                         {name}
@@ -549,7 +549,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
               </select>
 
               {form.schedule_type === "days" && (
-                <div className="ge-row-meta" style={{marginTop: 12}}>
+                <div className="ge-row-meta" style={{ marginTop: 12 }}>
                   {DAYS.map(day => (
                     <button key={day.value} type="button" onClick={() => toggleDay(day.value)} className={`ge-day-btn ${form.schedule_days.includes(day.value) ? 'active' : ''}`}>
                       {day.label}
@@ -559,7 +559,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
               )}
 
               {form.schedule_type === "date_range" && (
-                <div className="ge-form-row" style={{marginTop: 12}}>
+                <div className="ge-form-row" style={{ marginTop: 12 }}>
                   <div className="ge-form-group">
                     <label className="ge-form-help">Fecha inicio</label>
                     <input type="date" className="ge-input" value={form.date_start} onChange={e => setForm(f => ({ ...f, date_start: e.target.value }))} />
@@ -649,7 +649,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
           Pulsa <strong>"🔄 Sincronizar con WP"</strong> para enviar las reglas al plugin FlyCart en WordPress.
           El plugin se encarga de mostrar badges de descuento, precios tachados y toda la presentación visual en la tienda.
           Las reglas se activan/desactivan según el día de la semana o rango de fechas configurado.
-          <br/><br/>
+          <br /><br />
           <strong>⚠️ Nota:</strong> Los descuentos aplican a <strong>todas las sedes por igual</strong> porque el plugin FlyCart
           no soporta descuentos por sede. Para diferenciar por sede, usa categorías o productos específicos de cada sede.
         </div>

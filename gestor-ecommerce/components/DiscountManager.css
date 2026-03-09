@@ -1,0 +1,99 @@
+/* ═══════ DISCOUNT MANAGER ═══════ */
+/* Placeholder to split specific styles from GestorEcommerce.css later */
+.dm-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* ═══════ ACTIVE-TODAY BANNER ═══════ */
+.ge-active-today {
+    padding: 14px 16px;
+    border-radius: var(--ge-radius-lg);
+    background: var(--ge-success-light);
+    border-left: 4px solid var(--ge-success);
+    margin-bottom: 20px;
+}
+
+.ge-active-today-label,
+.ge-active-today-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #166534;
+    margin-bottom: 8px;
+}
+
+.ge-active-today-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ═══════ DAY BUTTONS ═══════ */
+.ge-day-btn {
+    padding: 8px 16px;
+    border-radius: var(--ge-radius);
+    cursor: pointer;
+    border: 2px solid var(--ge-border);
+    background: white;
+    color: var(--ge-text-muted);
+    font-weight: 400;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+}
+
+.ge-day-btn.selected,
+.ge-day-btn.active {
+    border-color: var(--ge-primary);
+    background: var(--ge-primary-light);
+    color: var(--ge-primary);
+    font-weight: 600;
+}
+
+/* ═══════ DISCOUNT RULE ROW ═══════ */
+.ge-rule-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    transition: opacity var(--ge-transition);
+}
+
+.ge-rule-row.dimmed {
+    opacity: 0.5;
+}
+
+.ge-rule-row.running,
+.ge-rule-row.running-border {
+    border-left: 4px solid var(--ge-success);
+}
+
+.ge-rule-row+.ge-rule-row {
+    border-top: 1px solid var(--ge-border-light);
+}
+
+.ge-rule-schedule {
+    font-size: 0.75rem;
+    color: var(--ge-text-light);
+    margin-top: 2px;
+}
+
+.ge-rule-status {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+}
+
+.ge-rule-import-list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.ge-rule-row.preview {
+    background: var(--ge-primary-light);
+    border-radius: var(--ge-radius);
+    border: 1px solid var(--ge-border);
+}

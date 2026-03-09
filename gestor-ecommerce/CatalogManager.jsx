@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, fetchTags, createTag, deleteTag, fetchProductDetail, fetchWooDetailsBatch } from "./services";
+import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, fetchTags, createTag, deleteTag, fetchProductDetail } from "./services";
 import "./GestorEcommerce.css";
 import "./components/CatalogManager.css";
 import ProductEditModal from "./components/ProductEditModal";
@@ -19,12 +19,8 @@ export default function CatalogManager({ sedeInfo }) {
   // Search Logic
   const [searchDebounce, setSearchDebounce] = useState(null);
 
-  // Woo Enrich Data (Map: woo_id => { categories:[], tags:[] })
-  const [wooRichData, setWooRichData] = useState({});
-
   // Edit State
   const [editingItem, setEditingItem] = useState(null);
-  const [savingEdit, setSavingEdit] = useState(false);
 
   // Categorías y Etiquetas (Globales para pasar al modal)
   const [categories, setCategories] = useState([]);
@@ -79,17 +75,21 @@ export default function CatalogManager({ sedeInfo }) {
     loadCatalog(1, "", "all");
     loadCategories();
     loadTags();
+    return () => { if (searchDebounce) clearTimeout(searchDebounce); };
   }, []);
 
   // Recargar cuando cambia el filtro
   useEffect(() => {
-    setPage(1);
-    loadCatalog(1, search, filterType);
+    if (page === 1) {
+      loadCatalog(1, search, filterType);
+    } else {
+      setPage(1); // this triggers the page effect which loads data
+    }
   }, [filterType]);
 
   // Recargar cuando cambia la página
   useEffect(() => {
-    loadCatalog(page, search, filterType);
+    if (page > 0) loadCatalog(page, search, filterType);
   }, [page]);
 
   // --- ACCIONES ---
@@ -360,23 +360,23 @@ export default function CatalogManager({ sedeInfo }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', flexWrap: 'wrap' }}>
-        <div className={`ge-card ge-stat-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => setFilterType('all')}>
+      <div className="ge-stats-grid" style={{ marginBottom: '24px' }}>
+        <div className={`ge-stat-card filter-card ${filterType === 'all' ? 'active' : ''}`} onClick={() => setFilterType('all')} style={{ cursor: 'pointer' }}>
           <h3>Total Siesa</h3>
-          <p>{counts.total}</p>
-          <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 'normal' }}>Productos encontrados en el ERP</span>
+          <div className="ge-stat-value">{counts.total}</div>
+          <div className="ge-stat-desc">Productos encontrados en el ERP</div>
         </div>
 
-        <div className={`ge-card ge-stat-card ${filterType === 'active' ? 'active' : ''}`} onClick={() => setFilterType('active')}>
-          <h3 style={{ color: '#2563eb' }}>Publicados</h3>
-          <p>{counts.active}</p>
-          <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 'normal' }}>Visibles actualmente en la tienda online</span>
+        <div className={`ge-stat-card filter-card ${filterType === 'active' ? 'active' : ''}`} onClick={() => setFilterType('active')} style={{ cursor: 'pointer' }}>
+          <h3 style={{ color: 'var(--ge-success)' }}>Publicados</h3>
+          <div className="ge-stat-value" style={{ color: 'var(--ge-success)' }}>{counts.active}</div>
+          <div className="ge-stat-desc">Visibles actualmente en la tienda online</div>
         </div>
 
-        <div className={`ge-card ge-stat-card ${filterType === 'unlinked' ? 'active' : ''}`} onClick={() => setFilterType('unlinked')}>
-          <h3 style={{ color: '#d97706' }}>⚠️ Pendientes Sincronizar</h3>
-          <p>{counts.unlinked}</p>
-          <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 'normal' }}>Existen en Siesa pero NO en WooCommerce</span>
+        <div className={`ge-stat-card filter-card ${filterType === 'unlinked' ? 'active' : ''}`} onClick={() => setFilterType('unlinked')} style={{ cursor: 'pointer' }}>
+          <h3 style={{ color: 'var(--ge-warning)' }}>⚠️ Pendientes Sincronizar</h3>
+          <div className="ge-stat-value" style={{ color: 'var(--ge-warning)' }}>{counts.unlinked}</div>
+          <div className="ge-stat-desc">Existen en Siesa pero NO en WooCommerce</div>
         </div>
       </div>
 
