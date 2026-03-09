@@ -316,10 +316,17 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
       )}
 
       {/* Filtro por sede movido arriba para que afecte el Preview */}
-      <div className="bm-filter-bar" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+      <div className="bm-filter-bar" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
         {sedes.length > 1 ? (
-          <div className="ge-row-meta">
-            <span className="ge-form-label" style={{ marginBottom: 0, marginRight: 8, fontSize: '0.95rem' }}>📍 Vista Sede:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              padding: '6px 12px', background: 'var(--ge-primary-light)', borderRadius: 'var(--ge-radius)',
+              border: '1px solid var(--ge-primary-ring)'
+            }}>
+              <span style={{ fontSize: '0.9rem' }}>📍</span>
+              <span style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--ge-primary)' }}>Vista Sede:</span>
+            </div>
             {[{ key: 'all', label: 'Todas', count: sedeCountAll }, { key: 'global', label: '🌐 Globales', count: sedeCountGlobal }].map(f => (
               <button key={f.key} className={`ge-pill ${sedeFilter === f.key ? 'active' : ''}`} onClick={() => setSedeFilter(f.key)}>
                 {f.label} ({f.count})
@@ -341,7 +348,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
           className={`bm-preview-toggle-btn ${showPreview ? 'active' : ''}`}
           onClick={() => setShowPreview(!showPreview)}
         >
-          {showPreview ? '👁️ Ocultar Vista Previa' : '👁️ Ver Vista Previa Real'}
+          {showPreview ? '🙈 Ocultar Vista Previa' : '👁️ Vista Previa'}
         </button>
       </div>
 
@@ -349,9 +356,10 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
       {showPreview && (
         <div className="bm-storefront-preview">
           <div className="bm-storefront-header">
-            👁️ Vista Previa de Tienda Virtual
+            <span style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'var(--ge-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', flexShrink: 0 }}>👁️</span>
+            Vista Previa de Tienda
             <span className="bm-storefront-header-subtitle">
-              Mostrando estructura activa para {sedeFilter === 'all' ? 'Todas las sedes' : sedeFilter === 'global' ? '🌐 Globales' : getSedeLabel(sedeFilter)}
+              — {sedeFilter === 'all' ? 'Todas las sedes' : sedeFilter === 'global' ? '🌐 Globales' : getSedeLabel(sedeFilter)}
             </span>
           </div>
           <div className="bm-storefront-layout">
