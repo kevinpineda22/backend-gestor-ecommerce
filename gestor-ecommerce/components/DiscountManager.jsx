@@ -41,6 +41,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [replaceAll, setReplaceAll] = useState(true);
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState([]);
   const [searchingProducts, setSearchingProducts] = useState(false);
@@ -144,11 +145,22 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         setSyncing(false);
         return;
       }
+
+      if (replaceAll) {
+        const confirmed = confirm(
+          `⚠️ MODO REEMPLAZO TOTAL\n\n` +
+          `Esto eliminará TODAS las reglas existentes en FlyCart (incluidas las creadas manualmente) ` +
+          `y las reemplazará con las ${activeRules.length} reglas del Gestor.\n\n` +
+          `El Gestor será la ÚNICA fuente de verdad.\n\n¿Continuar?`
+        );
+        if (!confirmed) { setSyncing(false); return; }
+      }
+
       const urls = Object.entries(SEDE_WP_URLS);
       const results = [];
       for (const [code, url] of urls) {
         try {
-          const r = await syncDiscountRulesToWP(url, activeRules);
+          const r = await syncDiscountRulesToWP(url, activeRules, replaceAll);
           results.push({ code, ok: r.ok, synced: r.synced || 0 });
         } catch {
           results.push({ code, ok: false, synced: 0 });
@@ -157,7 +169,11 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       const ok = results.filter(r => r.ok);
       const fail = results.filter(r => !r.ok);
       if (fail.length === 0) {
-        alert(`✅ ${activeRules.length} reglas sincronizadas en las ${ok.length} sedes.\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`);
+        alert(
+          replaceAll
+            ? `✅ Se reemplazaron TODAS las reglas en las ${ok.length} sedes.\n${activeRules.length} reglas del Gestor ahora son las únicas activas.`
+            : `✅ ${activeRules.length} reglas sincronizadas en las ${ok.length} sedes.\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`
+        );
       } else {
         alert(`⚠️ Sincronizado en ${ok.length} de ${urls.length} sedes.\n${fail.length} fallaron: ${fail.map(f => f.code).join(', ')}`);
       }
@@ -334,9 +350,15 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
             </button>
           )}
           {rules.length > 0 && (
-            <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing}>
-              {syncing ? "Sincronizando..." : "🔄 Sincronizar con WP"}
-            </button>
+            <>
+              <label className="ge-form-check" style={{fontSize: 12, marginRight: 8}}>
+                <input type="checkbox" checked={replaceAll} onChange={e => setReplaceAll(e.target.checked)} />
+                Reemplazar todas en FlyCart
+              </label>
+              <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing}>
+                {syncing ? "Sincronizando..." : "🔄 Sincronizar con WP"}
+              </button>
+            </>
           )}
           <button className="ge-btn" onClick={openCreate}>+ Nueva Regla</button>
         </div>
@@ -610,6 +632,9 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
           Pulsa <strong>"🔄 Sincronizar con WP"</strong> para enviar las reglas al plugin FlyCart en WordPress.
           El plugin se encarga de mostrar badges de descuento, precios tachados y toda la presentación visual en la tienda.
           Las reglas se activan/desactivan según el día de la semana o rango de fechas configurado.
+          <br/><br/>
+          <strong>☑️ "Reemplazar todas en FlyCart":</strong> Cuando está activado, elimina TODAS las reglas existentes en FlyCart
+          (incluidas las creadas manualmente) y las reemplaza con las del Gestor. Esto convierte al Gestor en la única fuente de verdad.
           <br/><br/>
           <strong>⚠️ Nota:</strong> Los descuentos aplican a <strong>todas las sedes por igual</strong> porque el plugin FlyCart
           no soporta descuentos por sede. Para diferenciar por sede, usa categorías o productos específicos de cada sede.

@@ -221,11 +221,14 @@ export const SEDE_WP_URLS = {
 };
 
 // --- SINCRONIZACIÓN DESCUENTOS → WORDPRESS (FlyCart) ---
-export async function syncDiscountRulesToWP(wpUrl, rules) {
+export async function syncDiscountRulesToWP(wpUrl, rules, replaceAll = false) {
+  const body = replaceAll
+    ? { rules, replace_all: true }
+    : rules;
   const res = await fetch(`${wpUrl}/wp-json/merkahorro/v1/sync-discount-rules?key=merkahorro2026`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(rules)
+    body: JSON.stringify(body)
   });
   return res.json();
 }
