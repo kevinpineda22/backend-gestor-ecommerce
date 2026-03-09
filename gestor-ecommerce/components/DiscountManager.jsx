@@ -104,13 +104,13 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     if (query.length < 2) { setProductResults([]); return; }
     setSearchingProducts(true);
     try {
-      const res = await fetch(`${window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://backend-gestor-ecommerce.vercel.app'}/api/catalog?search=${encodeURIComponent(query)}&pageSize=10&exactSearch=false`);
+      const res = await fetch(`${window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://backend-gestor-ecommerce.vercel.app'}/api/catalog?search=${encodeURIComponent(query)}&pageSize=10&exactSearch=false&filter=active`);
       const data = await res.json();
       if (data.ok) {
         setProductResults((data.data || []).map(p => ({
-          id: p.woo_id,
-          name: p.nombre || p.name || p.sku,
-          sku: p.sku || p.item_code,
+          id: p.woo_product_id || p.woo_id,
+          name: p.descripcion || p.nombre || p.name || p.item,
+          sku: p.item || p.sku || p.item_code,
         })).filter(p => p.id && !form.applies_to_ids.includes(p.id)));
       }
     } catch (err) { console.error(err); }
