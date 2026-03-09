@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 import "./BannerManager.css";
@@ -6,6 +6,15 @@ const SECTIONS = [
   { key: "home_slider", label: "🖼️ Slider Principal", desc: "Banner grande rotativo del inicio" },
   { key: "home_tiles", label: "🏷️ Tiles Promocionales", desc: "Cuadros pequeños debajo del slider" },
 ];
+
+const FAKE_CATEGORIES = [
+  "ASEO DEL HOGAR", "BEBIDAS", "BELLEZA", "CARNES Y PROTEÍNAS", "CONGELADOS",
+  "CUIDADO DEL BEBÉ", "CUIDADO PERSONAL", "FRUTAS Y VERDURAS", "HELADOS",
+  "IMPLEMENTOS DEL HOGAR", "LÁCTEOS, HUEVOS Y REFRIGERADOS", "LICORES Y CIGARRILLOS",
+  "MASCOTAS", "MERCADO", "SALUDABLE"
+];
+
+const FAKE_NAV = ["INICIO", "PRODUCTOS", "CARNES Y PROTEÍNAS", "FRUTAS Y VERDURAS", "LÁCTEOS"];
 
 export default function BannerManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
   const [allBanners, setAllBanners] = useState([]);
@@ -19,9 +28,10 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [importFilter, setImportFilter] = useState('all');
-  const [sedeFilter, setSedeFilter] = useState('all'); // 'all' | 'global' | codigo_sede
+  const [sedeFilter, setSedeFilter] = useState('all');
   const [importSede, setImportSede] = useState(sedeActual || 'PV001');
   const [showPreview, setShowPreview] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
 
   // Form state
   const [form, setForm] = useState({
@@ -315,7 +325,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
         </div>
       )}
 
-      {/* Filtro por sede movido arriba para que afecte el Preview */}
+      {/* Filtro por sede + preview toggle */}
       <div className="bm-filter-bar" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
         {sedes.length > 1 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -345,55 +355,107 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
         ) : <div />}
 
         <button
-          className={`bm-preview-toggle-btn ${showPreview ? 'active' : ''}`}
-          onClick={() => setShowPreview(!showPreview)}
+          className="bm-preview-toggle-btn"
+          onClick={() => { setShowPreview(true); setCurrentSlide(0); }}
         >
-          {showPreview ? '🙈 Ocultar Vista Previa' : '👁️ Vista Previa'}
+          👁️ Vista Previa Tienda
         </button>
       </div>
 
-      {/* Vista Previa Storefront */}
+      {/* ══════════ MODAL STOREFRONT PREVIEW ══════════ */}
       {showPreview && (
-        <div className="bm-storefront-preview">
-          <div className="bm-storefront-header">
-            <span style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'var(--ge-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', flexShrink: 0 }}>👁️</span>
-            Vista Previa de Tienda
-            <span className="bm-storefront-header-subtitle">
-              — {sedeFilter === 'all' ? 'Todas las sedes' : sedeFilter === 'global' ? '🌐 Globales' : getSedeLabel(sedeFilter)}
-            </span>
-          </div>
-          <div className="bm-storefront-layout">
-            <div className="bm-storefront-main">
-              {/* Slider */}
-              <div className="bm-storefront-slider">
-                {previewSliders.length > 0 ? (
-                  <>
-                    <img src={previewSliders[0].image_url} alt="Slider Activo" />
-                    {previewSliders.length > 1 && (
-                      <div style={{ position: 'absolute', bottom: 12, right: 12, background: 'rgba(0,0,0,0.65)', color: 'white', padding: '4px 12px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 600 }}>
-                        1 / {previewSliders.length}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="bm-storefront-slider-empty">No hay Slider activo configurado en esta sede</div>
-                )}
+        <div className="bm-preview-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowPreview(false); }}>
+          <div className="bm-preview-modal">
+            {/* Modal Header */}
+            <div className="bm-preview-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--ge-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', color: 'white', flexShrink: 0 }}>👁️</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--ge-text-dark)' }}>Vista Previa — Tienda Virtual</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--ge-text-muted)' }}>
+                    {sedeFilter === 'all' ? 'Todas las sedes' : sedeFilter === 'global' ? '🌐 Globales' : getSedeLabel(sedeFilter)}
+                    {' · '}{previewSliders.length} sliders · {previewTiles.length} tiles activos
+                  </div>
+                </div>
+              </div>
+              <button className="bm-preview-close" onClick={() => setShowPreview(false)}>✕</button>
+            </div>
+
+            {/* Simulated Store */}
+            <div className="bm-store-container">
+              {/* Top Nav Bar */}
+              <div className="bm-store-topnav">
+                <div className="bm-store-topnav-inner">
+                  {FAKE_NAV.map((item, i) => (
+                    <span key={i} className={`bm-store-topnav-item ${i === 0 ? 'active' : ''}`}>{item}</span>
+                  ))}
+                  <span className="bm-store-topnav-item muted">Vistos recientemente ▾</span>
+                </div>
               </div>
 
-              {/* Tiles */}
-              <div className="bm-storefront-tiles">
-                {[0, 1, 2, 3].map(i => {
-                  const tile = previewTiles[i];
-                  return (
-                    <div key={i} className="bm-storefront-tile">
-                      {tile ? (
-                        <img src={tile.image_url} alt={`Tile ${i + 1}`} />
-                      ) : (
-                        <div className="bm-storefront-tile-empty">Espacio {i + 1}</div>
-                      )}
+              {/* Main Content: Sidebar + Slider */}
+              <div className="bm-store-body">
+                {/* Categories Sidebar */}
+                <div className="bm-store-sidebar">
+                  <div className="bm-store-sidebar-title">Categorías</div>
+                  {FAKE_CATEGORIES.map((cat, i) => (
+                    <div key={i} className="bm-store-sidebar-item">
+                      <span>{cat}</span>
+                      <span style={{ color: '#bbb', fontSize: '0.7rem' }}>›</span>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+
+                {/* Slider Area */}
+                <div className="bm-store-slider-area">
+                  {previewSliders.length > 0 ? (
+                    <div className="bm-store-slider">
+                      <img
+                        src={previewSliders[currentSlide % previewSliders.length]?.image_url}
+                        alt="Slider"
+                        className="bm-store-slider-img"
+                      />
+                      {/* Slider Controls */}
+                      {previewSliders.length > 1 && (
+                        <>
+                          <button className="bm-store-slider-arrow left" onClick={() => setCurrentSlide(p => (p - 1 + previewSliders.length) % previewSliders.length)}>‹</button>
+                          <button className="bm-store-slider-arrow right" onClick={() => setCurrentSlide(p => (p + 1) % previewSliders.length)}>›</button>
+                          <div className="bm-store-slider-dots">
+                            {previewSliders.map((_, i) => (
+                              <span key={i} className={`bm-store-slider-dot ${i === currentSlide % previewSliders.length ? 'active' : ''}`} onClick={() => setCurrentSlide(i)} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {/* Slide counter */}
+                      <div className="bm-store-slider-counter">
+                        {(currentSlide % previewSliders.length) + 1} / {previewSliders.length}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bm-store-slider-empty">
+                      <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🖼️</div>
+                      No hay sliders activos para esta sede
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tiles Row */}
+              <div className="bm-store-tiles-row">
+                {previewTiles.length > 0 ? (
+                  previewTiles.map((tile, i) => (
+                    <div key={tile.id} className="bm-store-tile">
+                      <img src={tile.image_url} alt={tile.title || `Tile ${i + 1}`} />
+                    </div>
+                  ))
+                ) : (
+                  [0, 1, 2, 3, 4].map(i => (
+                    <div key={i} className="bm-store-tile empty">
+                      <span>Tile {i + 1}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
