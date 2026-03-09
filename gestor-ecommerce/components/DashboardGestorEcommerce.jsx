@@ -93,7 +93,7 @@ const DashboardGestorEcommerce = ({ setActiveTab, sedeInfo }) => {
 
         <div className="ge-stat-card">
           <h3>Publicados</h3>
-          <div className="ge-stat-value" style={{ color: '#10b981' }}>
+          <div className="ge-stat-value" style={{ color: 'var(--ge-success)' }}>
             {loading ? '...' : data.catalog.active_products}
           </div>
           <div className="ge-stat-desc">Visibles en tienda</div>
@@ -101,7 +101,7 @@ const DashboardGestorEcommerce = ({ setActiveTab, sedeInfo }) => {
 
         <div className="ge-stat-card">
           <h3>Borradores</h3>
-          <div className="ge-stat-value" style={{ color: '#f59e0b' }}>
+          <div className="ge-stat-value" style={{ color: 'var(--ge-warning)' }}>
             {loading ? '...' : data.catalog.draft_products}
           </div>
           <div className="ge-stat-desc">Ocultos / En revisión</div>
@@ -109,7 +109,7 @@ const DashboardGestorEcommerce = ({ setActiveTab, sedeInfo }) => {
 
         <div className="ge-stat-card">
           <h3>Sin Imagen</h3>
-          <div className="ge-stat-value" style={{ color: data.catalog.missing_images > 0 ? '#ef4444' : '#6b7280' }}>
+          <div className="ge-stat-value" style={{ color: data.catalog.missing_images > 0 ? 'var(--ge-danger)' : 'var(--ge-text-muted)' }}>
             {loading ? '...' : data.catalog.missing_images}
           </div>
           <div className="ge-stat-desc">Requieren atención</div>

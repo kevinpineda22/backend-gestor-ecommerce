@@ -8,7 +8,7 @@ const router = express.Router();
 // GET /api/content/banners
 router.get('/banners', async (req, res) => {
     try {
-        const result = await contentService.getBanners(req.query.section || 'home_slider');
+        const result = await contentService.getBanners(req.query.section || 'home_slider', req.query.sede || null);
         res.json(result);
     } catch (err) {
         res.status(500).json({ ok: false, message: err.message });

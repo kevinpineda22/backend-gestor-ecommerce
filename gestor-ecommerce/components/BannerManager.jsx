@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage } from "../services";
+import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 
 const SECTIONS = [
@@ -7,7 +7,7 @@ const SECTIONS = [
   { key: "home_tiles", label: "🏷️ Tiles Promocionales", desc: "Cuadros pequeños debajo del slider" },
 ];
 
-export default function BannerManager() {
+export default function BannerManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
   const [allBanners, setAllBanners] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -18,11 +18,13 @@ export default function BannerManager() {
   const [publishing, setPublishing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
-  const [importFilter, setImportFilter] = useState('all'); // all | revslider | woo_category | media_library
+  const [importFilter, setImportFilter] = useState('all');
+  const [sedeFilter, setSedeFilter] = useState('all'); // 'all' | 'global' | codigo_sede
+  const [importSede, setImportSede] = useState(sedeActual || 'PV001');
 
   // Form state
   const [form, setForm] = useState({
-    title: "", image_url: "", link_url: "", active: true, display_order: 0, section: "home_slider"
+    title: "", image_url: "", link_url: "", active: true, display_order: 0, section: "home_slider", sedes: null
   });
 
   useEffect(() => { loadAllBanners(); }, []);
@@ -47,20 +49,30 @@ export default function BannerManager() {
     }
   };
 
-  // Filtrar por sección activa
+  // Filtrar por sección activa + sede
   const banners = allBanners
     .filter(b => b.section === activeSection)
+    .filter(b => {
+      if (sedeFilter === 'all') return true;
+      if (sedeFilter === 'global') return !b.sedes;
+      return b.sedes && b.sedes.includes(sedeFilter);
+    })
     .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
 
+  // Conteos por sede para badges
+  const bannersInSection = allBanners.filter(b => b.section === activeSection);
+  const sedeCountAll = bannersInSection.length;
+  const sedeCountGlobal = bannersInSection.filter(b => !b.sedes).length;
+
   const resetForm = () => {
-    setForm({ title: "", image_url: "", link_url: "", active: true, display_order: 0, section: activeSection });
+    setForm({ title: "", image_url: "", link_url: "", active: true, display_order: 0, section: activeSection, sedes: null });
     setEditingBanner(null);
     setShowForm(false);
   };
 
   const openCreate = () => {
     resetForm();
-    setForm(f => ({ ...f, section: activeSection, display_order: banners.length }));
+    setForm(f => ({ ...f, section: activeSection, display_order: banners.length, sedes: null }));
     setShowForm(true);
   };
 
@@ -68,7 +80,8 @@ export default function BannerManager() {
     setEditingBanner(banner);
     setForm({
       title: banner.title || "", image_url: banner.image_url || "", link_url: banner.link_url || "",
-      active: banner.active, display_order: banner.display_order || 0, section: banner.section || "home_slider"
+      active: banner.active, display_order: banner.display_order || 0, section: banner.section || "home_slider",
+      sedes: banner.sedes || null
     });
     setShowForm(true);
   };
@@ -138,33 +151,32 @@ export default function BannerManager() {
 
   const handlePublish = async () => {
     setPublishing(true);
-    try {
-      // Limpiar caché de WordPress para que tome los cambios inmediatamente
-      const wpUrl = prompt("URL de tu WordPress (ej: https://merkahorro.com):");
-      if (!wpUrl) { setPublishing(false); return; }
-      const cleanUrl = wpUrl.replace(/\/+$/, '');
-      const res = await fetch(`${cleanUrl}/wp-json/merkahorro/v1/clear-cache?key=merkahorro2026`);
-      if (res.ok) {
-        alert("✅ Caché de WordPress limpiado. Los cambios ya están visibles en la tienda.");
-      } else {
-        alert("⚠️ No se pudo limpiar el caché. Verifica que el plugin esté instalado en WordPress.");
+    const urls = Object.entries(SEDE_WP_URLS);
+    const results = [];
+    for (const [code, url] of urls) {
+      try {
+        const res = await fetch(`${url}/wp-json/merkahorro/v1/clear-cache?key=merkahorro2026`);
+        results.push({ code, ok: res.ok });
+      } catch {
+        results.push({ code, ok: false });
       }
-    } catch (err) {
-      alert("Error conectando con WordPress: " + err.message);
-    } finally {
-      setPublishing(false);
     }
+    const ok = results.filter(r => r.ok).length;
+    const fail = results.filter(r => !r.ok).length;
+    if (fail === 0) {
+      alert(`✅ Caché limpiado en las ${ok} sedes. Los cambios ya están visibles.`);
+    } else {
+      alert(`⚠️ Caché limpiado en ${ok} de ${urls.length} sedes. ${fail} fallaron.`);
+    }
+    setPublishing(false);
   };
 
   // --- Importar banners desde WordPress ---
   const handleFetchWpBanners = async () => {
-    const wpUrl = prompt("URL de tu WordPress (ej: https://supermercadomerkahorro.com):");
-    if (!wpUrl) return;
-    const cleanUrl = wpUrl.replace(/\/+$/, '');
-
     setImporting(true);
     try {
-      const res = await fetch(`${cleanUrl}/wp-json/merkahorro/v1/wp-banners?key=merkahorro2026`);
+      const wpUrl = SEDE_WP_URLS[importSede] || SEDE_WP_URLS['PV001'];
+      const res = await fetch(`${wpUrl}/wp-json/merkahorro/v1/wp-banners?key=merkahorro2026`);
       const data = await res.json();
       if (data.ok && data.data?.length > 0) {
         setImportPreview(data);
@@ -213,160 +225,97 @@ export default function BannerManager() {
 
   const sectionInfo = SECTIONS.find(s => s.key === activeSection);
 
+  const getSedeLabel = (code) => sedes.find(s => (s.codigo_siesa || s.slug) === code)?.nombre || code;
+
   return (
     <div>
-      {/* Header con botones */}
+      {/* Header */}
       <div className="ge-header">
         <div className="ge-title">
           <h2>Gestión de Banners</h2>
           <p>Administra los sliders y promociones de la tienda</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {allBanners.length === 0 && (
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#7c3aed', color: 'white' }}
-              onClick={handleFetchWpBanners}
-              disabled={importing}
-            >
-              {importing ? "Consultando..." : "📥 Importar desde WordPress"}
-            </button>
-          )}
-          <button
-            className="ge-btn"
-            style={{ backgroundColor: '#059669', color: 'white' }}
-            onClick={handlePublish}
-            disabled={publishing}
-          >
+        <div className="ge-header-actions">
+          <select className="ge-input ge-input-sm" value={importSede} onChange={e => setImportSede(e.target.value)} style={{width:'auto'}}>
+            {Object.entries(SEDE_WP_URLS).map(([code]) => (
+              <option key={code} value={code}>{getSedeLabel(code)}</option>
+            ))}
+          </select>
+          <button className="ge-btn info" onClick={handleFetchWpBanners} disabled={importing}>
+            {importing ? "Consultando..." : "📥 Importar desde WP"}
+          </button>
+          <button className="ge-btn accent" onClick={handlePublish} disabled={publishing}>
             {publishing ? "Publicando..." : "🚀 Publicar en tienda"}
           </button>
-          <button className="ge-btn" style={{ backgroundColor: '#2563eb', color: 'white' }} onClick={openCreate}>
-            + Nuevo Banner
-          </button>
+          <button className="ge-btn" onClick={openCreate}>+ Nuevo Banner</button>
         </div>
       </div>
 
-      {/* Panel de importación desde WordPress */}
+      {/* Panel de importación */}
       {importPreview && (
-        <div className="ge-card" style={{ padding: '24px', marginBottom: '24px', borderLeft: '4px solid #7c3aed' }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: '1.1rem', fontWeight: 600, color: '#7c3aed' }}>
-            📥 Imágenes encontradas en WordPress ({importBanners.length})
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
+        <div className="ge-card ge-import-panel">
+          <h3 className="ge-import-title">📥 Imágenes encontradas en WordPress ({importBanners.length})</h3>
+          <p className="ge-import-subtitle">
             Fuentes detectadas:
             {importPreview.sources?.revslider && ' ✅ Slider Revolution'}
             {importPreview.sources?.woo_categories && ' ✅ Categorías WooCommerce'}
             {importPreview.sources?.media_library && ' ✅ Media Library'}
           </p>
 
-          {/* Filtro por fuente */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div className="ge-row-meta" style={{marginBottom: 16}}>
             {['all', 'revslider', 'woo_category', 'media_library'].map(f => {
               const count = f === 'all' ? importBanners.length : importBanners.filter(b => b.source === f).length;
               if (f !== 'all' && count === 0) return null;
               return (
-                <button
-                  key={f}
-                  onClick={() => setImportFilter(f)}
-                  style={{
-                    padding: '6px 14px', borderRadius: '20px', fontSize: '0.8rem', cursor: 'pointer',
-                    border: importFilter === f ? '2px solid #7c3aed' : '2px solid #e5e7eb',
-                    background: importFilter === f ? '#f5f3ff' : 'white',
-                    color: importFilter === f ? '#7c3aed' : '#6b7280',
-                    fontWeight: importFilter === f ? 600 : 400,
-                  }}
-                >
+                <button key={f} className={`ge-pill ${importFilter === f ? 'active' : ''}`} onClick={() => setImportFilter(f)}>
                   {f === 'all' ? `Todas (${count})` : `${SOURCE_LABELS[f] || f} (${count})`}
                 </button>
               );
             })}
           </div>
 
-          {/* Grid de preview */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+          <div className="ge-import-grid">
             {filteredImport.map((b, idx) => (
-              <div key={idx} style={{
-                borderRadius: '10px', overflow: 'hidden', border: '1px solid #e9d5ff',
-                background: 'white', transition: 'transform 0.15s',
-              }}>
-                <img
-                  src={b.image_url}
-                  alt={b.title}
-                  style={{ width: '100%', height: '120px', objectFit: 'cover', display: 'block' }}
-                  onError={e => { e.target.style.display = 'none'; }}
-                />
-                <div style={{ padding: '10px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.8rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {b.title}
-                  </div>
-                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: '10px', fontSize: '0.65rem',
-                      background: b.section === 'home_slider' ? '#dbeafe' : '#fef3c7',
-                      color: b.section === 'home_slider' ? '#1d4ed8' : '#92400e'
-                    }}>
+              <div key={idx} className="ge-import-item">
+                <img src={b.image_url} alt={b.title} onError={e => { e.target.style.display = 'none'; }} />
+                <div className="ge-import-item-body">
+                  <div className="ge-import-item-title">{b.title}</div>
+                  <div className="ge-row-meta">
+                    <span className={`ge-chip ${b.section === 'home_slider' ? 'global' : 'product'}`}>
                       {b.section === 'home_slider' ? 'Slider' : 'Tile'}
                     </span>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: '10px', fontSize: '0.65rem',
-                      background: '#f3f4f6', color: '#6b7280'
-                    }}>
-                      {SOURCE_LABELS[b.source] || b.source}
-                    </span>
+                    <span className="ge-chip source">{SOURCE_LABELS[b.source] || b.source}</span>
                   </div>
                   {b.slider_name && b.source === 'revslider' && (
-                    <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '4px' }}>
-                      Slider: {b.slider_name}
-                    </div>
+                    <div className="ge-form-help">Slider: {b.slider_name}</div>
                   )}
                 </div>
               </div>
             ))}
           </div>
 
-          {filteredImport.length === 0 && (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#9ca3af', fontSize: '0.85rem' }}>
-              No hay imágenes de esta fuente.
-            </div>
-          )}
+          {filteredImport.length === 0 && <div className="ge-empty">No hay imágenes de esta fuente.</div>}
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#7c3aed', color: 'white' }}
-              onClick={() => handleImportBanners(filteredImport)}
-              disabled={saving || filteredImport.length === 0}
-            >
+          <div className="ge-form-actions">
+            <button className="ge-btn info" onClick={() => handleImportBanners(filteredImport)} disabled={saving || filteredImport.length === 0}>
               {saving ? "Importando..." : `✅ Importar ${filteredImport.length === importBanners.length ? 'todas' : 'filtradas'} (${filteredImport.length})`}
             </button>
-            <button
-              className="ge-btn"
-              style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
-              onClick={() => setImportPreview(null)}
-            >
-              Cancelar
-            </button>
+            <button className="ge-btn secondary" onClick={() => setImportPreview(null)}>Cancelar</button>
           </div>
         </div>
       )}
 
       {/* Tabs de sección */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+      <div className="ge-tabs">
         {SECTIONS.map(sec => (
           <button
             key={sec.key}
             onClick={() => { setActiveSection(sec.key); resetForm(); }}
-            className="ge-card"
-            style={{
-              flex: 1, padding: '16px', cursor: 'pointer', textAlign: 'center',
-              border: activeSection === sec.key ? '2px solid #2563eb' : '2px solid transparent',
-              background: activeSection === sec.key ? '#eff6ff' : 'white',
-              transition: 'all 0.2s'
-            }}
+            className={`ge-tab ${activeSection === sec.key ? 'active' : ''}`}
           >
-            <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '4px' }}>{sec.label}</div>
-            <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{sec.desc}</div>
-            <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '6px' }}>
+            <div className="ge-tab-label">{sec.label}</div>
+            <div className="ge-tab-desc">{sec.desc}</div>
+            <div className="ge-tab-count">
               {allBanners.filter(b => b.section === sec.key).length} banners
               · {allBanners.filter(b => b.section === sec.key && b.active).length} activos
             </div>
@@ -374,215 +323,160 @@ export default function BannerManager() {
         ))}
       </div>
 
-      {/* Formulario crear/editar */}
+      {/* Formulario */}
       {showForm && (
-        <div className="ge-card" style={{ padding: '24px', marginBottom: '24px' }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: '1.1rem', fontWeight: 600 }}>
+        <div className="ge-card pad" style={{marginBottom: 24}}>
+          <h3 className="ge-import-title" style={{color: 'var(--ge-text-dark)'}}>
             {editingBanner ? "Editar Banner" : `Nuevo Banner — ${sectionInfo?.label || activeSection}`}
           </h3>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Título</label>
-              <input
-                className="ge-input"
-                style={{ width: '100%' }}
-                placeholder="Ej: Promo Semana Santa"
-                value={form.title}
-                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>URL de destino</label>
-              <input
-                className="ge-input"
-                style={{ width: '100%' }}
-                placeholder="https://tienda.com/promo"
-                value={form.link_url}
-                onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          {/* Imagen */}
-          <div style={{ marginTop: '16px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '8px' }}>Imagen del Banner</label>
-            <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-              <div>
-                <input type="file" accept="image/*" onChange={handleImageUpload} disabled={uploading} />
-                {uploading && <span style={{ fontSize: '0.8rem', color: '#6b7280', marginLeft: '8px' }}>Subiendo...</span>}
-                {form.image_url && (
-                  <input
-                    className="ge-input"
-                    style={{ width: '100%', marginTop: '8px', fontSize: '0.8rem' }}
-                    value={form.image_url}
-                    onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
-                    placeholder="O pega URL directamente"
-                  />
-                )}
+          <div className="ge-form">
+            <div className="ge-form-row">
+              <div className="ge-form-group">
+                <label>Título</label>
+                <input className="ge-input" placeholder="Ej: Promo Semana Santa" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
               </div>
-              {form.image_url && (
-                <img
-                  src={form.image_url}
-                  alt="Preview"
-                  style={{ width: '200px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                />
-              )}
+              <div className="ge-form-group">
+                <label>URL de destino</label>
+                <input className="ge-input" placeholder="https://tienda.com/promo" value={form.link_url} onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))} />
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', gap: '16px', marginTop: '16px', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={form.active}
-                onChange={e => setForm(f => ({ ...f, active: e.target.checked }))}
-              />
-              Activo
-            </label>
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 500, marginRight: '6px' }}>Orden:</label>
-              <input
-                type="number"
-                className="ge-input"
-                style={{ width: '60px' }}
-                value={form.display_order}
-                onChange={e => setForm(f => ({ ...f, display_order: Number(e.target.value) }))}
-              />
+            <div className="ge-form-group">
+              <label>Imagen del Banner</label>
+              <div className="ge-form-help" style={{marginBottom: 8}}>
+                {form.section === 'home_slider'
+                  ? '📐 Tamaño recomendado: 1200×800px (proporción 3:2). Mínimo 1200px de ancho.'
+                  : '📐 Tamaño recomendado: 600×800px (proporción 3:4, vertical). Mínimo 450px de ancho.'}
+              </div>
+              <div className="ge-upload-area">
+                <div>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} disabled={uploading} />
+                  {uploading && <span className="ge-form-help">Subiendo...</span>}
+                  {form.image_url && (
+                    <input className="ge-input ge-input-sm" style={{marginTop: 8}} value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="O pega URL directamente" />
+                  )}
+                </div>
+                {form.image_url && <img src={form.image_url} alt="Preview" className="ge-upload-preview" />}
+              </div>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', gap: '8px', marginTop: '20px' }}>
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#2563eb', color: 'white' }}
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? "Guardando..." : (editingBanner ? "Actualizar" : "Crear Banner")}
-            </button>
-            <button
-              className="ge-btn"
-              style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
-              onClick={resetForm}
-            >
-              Cancelar
-            </button>
+            <div className="ge-row-meta">
+              <label className="ge-form-check">
+                <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} /> Activo
+              </label>
+              <div className="ge-form-check">
+                <span>Orden:</span>
+                <input type="number" className="ge-input ge-input-sm" style={{width: 60}} value={form.display_order} onChange={e => setForm(f => ({ ...f, display_order: Number(e.target.value) }))} />
+              </div>
+            </div>
+
+            {/* Selector de sedes */}
+            {sedes.length > 1 && (
+              <div className="ge-form-group">
+                <label>Visible en sedes</label>
+                <div className="ge-row-meta">
+                  <button type="button" className={`ge-pill ${form.sedes === null ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, sedes: null }))}>
+                    Todas las sedes
+                  </button>
+                  {sedes.map(s => {
+                    const code = s.codigo_siesa || s.slug;
+                    const isSelected = Array.isArray(form.sedes) && form.sedes.includes(code);
+                    return (
+                      <button key={s.id} type="button" className={`ge-pill ${isSelected ? 'active-accent' : ''}`}
+                        onClick={() => {
+                          setForm(f => {
+                            const cur = Array.isArray(f.sedes) ? [...f.sedes] : [];
+                            if (isSelected) { const next = cur.filter(c => c !== code); return { ...f, sedes: next.length === 0 ? null : next }; }
+                            return { ...f, sedes: [...cur, code] };
+                          });
+                        }}
+                      >
+                        {s.nombre}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="ge-form-help">
+                  {form.sedes === null ? '🌐 Se mostrará en todas las sedes' : `📍 Solo en: ${form.sedes.map(c => getSedeLabel(c)).join(', ')}`}
+                </div>
+              </div>
+            )}
+
+            <div className="ge-form-actions">
+              <button className="ge-btn" onClick={handleSave} disabled={saving}>
+                {saving ? "Guardando..." : (editingBanner ? "Actualizar" : "Crear Banner")}
+              </button>
+              <button className="ge-btn secondary" onClick={resetForm}>Cancelar</button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Grid de banners de la sección activa */}
-      {loading ? (
-        <div className="ge-card" style={{ padding: '40px', textAlign: 'center' }}>Cargando banners...</div>
-      ) : banners.length === 0 ? (
-        <div className="ge-card" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>
-          No hay banners en "{sectionInfo?.label}". Crea el primero.
+      {/* Filtro por sede */}
+      {sedes.length > 1 && (
+        <div className="ge-row-meta" style={{marginBottom: 16}}>
+          <span className="ge-form-label" style={{marginBottom: 0, marginRight: 4}}>Filtrar por sede:</span>
+          {[{ key: 'all', label: 'Todas', count: sedeCountAll }, { key: 'global', label: '🌐 Globales', count: sedeCountGlobal }].map(f => (
+            <button key={f.key} className={`ge-pill ${sedeFilter === f.key ? 'active' : ''}`} onClick={() => setSedeFilter(f.key)}>
+              {f.label} ({f.count})
+            </button>
+          ))}
+          {sedes.map(s => {
+            const code = s.codigo_siesa || s.slug;
+            const count = bannersInSection.filter(b => b.sedes && b.sedes.includes(code)).length;
+            return (
+              <button key={code} className={`ge-pill ${sedeFilter === code ? 'active-accent' : ''}`} onClick={() => setSedeFilter(code)}>
+                📍 {s.nombre} ({count})
+              </button>
+            );
+          })}
         </div>
+      )}
+
+      {/* Lista de banners */}
+      {loading ? (
+        <div className="ge-card ge-empty">Cargando banners...</div>
+      ) : banners.length === 0 ? (
+        <div className="ge-card ge-empty">No hay banners en "{sectionInfo?.label}". Crea el primero.</div>
       ) : (
-        <div style={{ display: 'grid', gap: '16px' }}>
+        <div className="ge-card">
           {banners.map((banner, idx) => (
-            <div
-              key={banner.id}
-              className="ge-card"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '16px',
-                padding: '16px',
-                opacity: banner.active ? 1 : 0.5,
-                transition: 'opacity 0.2s'
-              }}
-            >
-              {/* Reorder arrows */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <button
-                  onClick={() => handleReorder(banner.id, 'up')}
-                  disabled={idx === 0}
-                  style={{
-                    border: 'none', background: 'none', cursor: idx === 0 ? 'default' : 'pointer',
-                    fontSize: '1rem', color: idx === 0 ? '#d1d5db' : '#6b7280', padding: '2px 6px'
-                  }}
-                >▲</button>
-                <button
-                  onClick={() => handleReorder(banner.id, 'down')}
-                  disabled={idx === banners.length - 1}
-                  style={{
-                    border: 'none', background: 'none', cursor: idx === banners.length - 1 ? 'default' : 'pointer',
-                    fontSize: '1rem', color: idx === banners.length - 1 ? '#d1d5db' : '#6b7280', padding: '2px 6px'
-                  }}
-                >▼</button>
+            <div key={banner.id} className={`ge-row ${banner.active ? '' : 'dimmed'}`}>
+              <div className="ge-row-reorder">
+                <button onClick={() => handleReorder(banner.id, 'up')} disabled={idx === 0}>▲</button>
+                <button onClick={() => handleReorder(banner.id, 'down')} disabled={idx === banners.length - 1}>▼</button>
               </div>
-
-              {/* Thumbnail */}
-              <img
-                src={banner.image_url}
-                alt={banner.title || 'Banner'}
-                style={{
-                  width: '180px', height: '72px', objectFit: 'cover',
-                  borderRadius: '8px', border: '1px solid #e5e7eb', flexShrink: 0
-                }}
-              />
-
-              {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '4px' }}>
-                  {banner.title || '(Sin título)'}
-                </div>
-                {banner.link_url && (
-                  <div style={{ fontSize: '0.8rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    🔗 {banner.link_url}
-                  </div>
-                )}
-                <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '2px' }}>
-                  Orden: {banner.display_order}
+              <img src={banner.image_url} alt={banner.title || 'Banner'} className="ge-row-thumb" />
+              <div className="ge-row-info">
+                <div className="ge-row-title">{banner.title || '(Sin título)'}</div>
+                {banner.link_url && <div className="ge-row-subtitle">🔗 {banner.link_url}</div>}
+                <div className="ge-row-meta">
+                  <span className="order">Orden: {banner.display_order}</span>
+                  {banner.sedes ? (
+                    banner.sedes.map((code, i) => <span key={i} className="ge-chip sede">{getSedeLabel(code)}</span>)
+                  ) : (
+                    <span className="ge-chip global">Todas las sedes</span>
+                  )}
                 </div>
               </div>
-
-              {/* Status badge */}
-              <span
-                style={{
-                  padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
-                  background: banner.active ? '#dcfce7' : '#f3f4f6',
-                  color: banner.active ? '#166534' : '#9ca3af'
-                }}
-              >
+              <span className={`ge-badge ${banner.active ? 'active' : 'inactive'}`}>
                 {banner.active ? 'Activo' : 'Inactivo'}
               </span>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                <button
-                  className="ge-btn"
-                  style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #d1d5db', color: '#374151' }}
-                  onClick={() => handleToggleActive(banner)}
-                >
-                  {banner.active ? '⏸' : '▶'}
-                </button>
-                <button
-                  className="ge-btn"
-                  style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #2563eb', color: '#2563eb' }}
-                  onClick={() => openEdit(banner)}
-                >
-                  ✏️
-                </button>
-                <button
-                  className="ge-btn"
-                  style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #ef4444', color: '#ef4444' }}
-                  onClick={() => handleDelete(banner.id)}
-                >
-                  🗑️
-                </button>
+              <div className="ge-row-actions">
+                <button className="ge-btn icon outline-muted" onClick={() => handleToggleActive(banner)}>{banner.active ? '⏸' : '▶'}</button>
+                <button className="ge-btn icon outline-primary" onClick={() => openEdit(banner)}>✏️</button>
+                <button className="ge-btn icon outline-danger" onClick={() => handleDelete(banner.id)}>🗑️</button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Nota de configuración */}
-      <div className="ge-card" style={{ padding: '16px', marginTop: '20px', background: '#fffbeb', borderLeft: '4px solid #f59e0b' }}>
-        <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>💡 Integración WordPress</div>
-        <div style={{ fontSize: '0.8rem', color: '#78716c', lineHeight: 1.5 }}>
+      {/* Nota */}
+      <div className="ge-note">
+        <div className="ge-note-title">💡 Integración WordPress</div>
+        <div className="ge-note-body">
           Después de modificar banners, pulsa <strong>"🚀 Publicar en tienda"</strong> para que los cambios se reflejen inmediatamente en WordPress.
           Sin publicar, los cambios aparecerán automáticamente en máximo 5 minutos.
         </div>

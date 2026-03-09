@@ -211,3 +211,21 @@ export async function deleteDiscountRule(id) {
   });
   return res.json();
 }
+
+// --- URLs de WordPress por sede ---
+export const SEDE_WP_URLS = {
+  'PV001':  'https://supermercadomerkahorro.com',
+  '00301':  'https://girardota.supermercadomerkahorro.com',
+  '00701':  'https://barbosa.supermercadomerkahorro.com',
+  '00201':  'https://villahermosa.supermercadomerkahorro.com',
+};
+
+// --- SINCRONIZACIÓN DESCUENTOS → WORDPRESS (FlyCart) ---
+export async function syncDiscountRulesToWP(wpUrl, rules) {
+  const res = await fetch(`${wpUrl}/wp-json/merkahorro/v1/sync-discount-rules?key=merkahorro2026`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rules)
+  });
+  return res.json();
+}

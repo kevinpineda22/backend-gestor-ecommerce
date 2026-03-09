@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchDiscountRules, createDiscountRule, updateDiscountRule, deleteDiscountRule, fetchCategories } from "../services";
+import { fetchDiscountRules, createDiscountRule, updateDiscountRule, deleteDiscountRule, fetchCategories, syncDiscountRulesToWP, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 
 const DAYS = [
@@ -29,7 +29,7 @@ const EMPTY_FORM = {
   display_order: 0,
 };
 
-export default function DiscountManager() {
+export default function DiscountManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
   const [rules, setRules] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -39,7 +39,11 @@ export default function DiscountManager() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [categorySearch, setCategorySearch] = useState("");
   const [importing, setImporting] = useState(false);
-  const [importPreview, setImportPreview] = useState(null); // reglas leídas de WP antes de importar
+  const [importPreview, setImportPreview] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [productResults, setProductResults] = useState([]);
+  const [searchingProducts, setSearchingProducts] = useState(false);
 
   useEffect(() => {
     loadRules();
@@ -67,15 +71,13 @@ export default function DiscountManager() {
     }
   };
 
+  const WP_MAIN = SEDE_WP_URLS['PV001'];
+
   // --- Importar reglas desde WordPress ---
   const handleFetchWooRules = async () => {
-    const wpUrl = prompt("URL de tu WordPress (ej: https://supermercadomerkahorro.com):");
-    if (!wpUrl) return;
-    const cleanUrl = wpUrl.replace(/\/+$/, '');
-
     setImporting(true);
     try {
-      const res = await fetch(`${cleanUrl}/wp-json/merkahorro/v1/woo-discount-rules?key=merkahorro2026`);
+      const res = await fetch(`${WP_MAIN}/wp-json/merkahorro/v1/woo-discount-rules?key=merkahorro2026`);
       const data = await res.json();
       if (data.ok && data.data?.length > 0) {
         setImportPreview(data.data);
@@ -91,6 +93,78 @@ export default function DiscountManager() {
       setImportPreview(null);
     } finally {
       setImporting(false);
+    }
+  };
+
+  // --- Buscar productos por SKU/nombre ---
+  const handleProductSearch = async (query) => {
+    setProductSearch(query);
+    if (query.length < 2) { setProductResults([]); return; }
+    setSearchingProducts(true);
+    try {
+      const res = await fetch(`${window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://backend-gestor-ecommerce.vercel.app'}/api/catalog?search=${encodeURIComponent(query)}&pageSize=10&exactSearch=false`);
+      const data = await res.json();
+      if (data.ok) {
+        setProductResults((data.data || []).map(p => ({
+          id: p.woo_id,
+          name: p.nombre || p.name || p.sku,
+          sku: p.sku || p.item_code,
+        })).filter(p => p.id && !form.applies_to_ids.includes(p.id)));
+      }
+    } catch (err) { console.error(err); }
+    finally { setSearchingProducts(false); }
+  };
+
+  const addProduct = (prod) => {
+    if (form.applies_to_ids.includes(prod.id)) return;
+    setForm(f => ({
+      ...f,
+      applies_to_ids: [...f.applies_to_ids, prod.id],
+      applies_to_names: [...f.applies_to_names, prod.name + (prod.sku ? ` (${prod.sku})` : '')]
+    }));
+    setProductSearch("");
+    setProductResults([]);
+  };
+
+  const removeProduct = (idx) => {
+    setForm(f => ({
+      ...f,
+      applies_to_ids: f.applies_to_ids.filter((_, i) => i !== idx),
+      applies_to_names: f.applies_to_names.filter((_, i) => i !== idx)
+    }));
+  };
+
+  // --- Sincronizar reglas a WordPress (FlyCart) ---
+  const handleSyncToWP = async () => {
+    setSyncing(true);
+    try {
+      const activeRules = rules.filter(r => r.active);
+      if (activeRules.length === 0) {
+        alert("No hay reglas activas para sincronizar.");
+        setSyncing(false);
+        return;
+      }
+      const urls = Object.entries(SEDE_WP_URLS);
+      const results = [];
+      for (const [code, url] of urls) {
+        try {
+          const r = await syncDiscountRulesToWP(url, activeRules);
+          results.push({ code, ok: r.ok, synced: r.synced || 0 });
+        } catch {
+          results.push({ code, ok: false, synced: 0 });
+        }
+      }
+      const ok = results.filter(r => r.ok);
+      const fail = results.filter(r => !r.ok);
+      if (fail.length === 0) {
+        alert(`✅ ${activeRules.length} reglas sincronizadas en las ${ok.length} sedes.\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`);
+      } else {
+        alert(`⚠️ Sincronizado en ${ok.length} de ${urls.length} sedes.\n${fail.length} fallaron: ${fail.map(f => f.code).join(', ')}`);
+      }
+    } catch (err) {
+      alert("Error sincronizando: " + err.message);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -253,48 +327,38 @@ export default function DiscountManager() {
           <h2>Reglas de Descuento</h2>
           <p>Configura descuentos automáticos por día, categoría o rango de fecha</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="ge-header-actions">
           {rules.length === 0 && (
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#7c3aed', color: 'white' }}
-              onClick={handleFetchWooRules}
-              disabled={importing}
-            >
+            <button className="ge-btn info" onClick={handleFetchWooRules} disabled={importing}>
               {importing ? "Consultando..." : "📥 Importar desde WooCommerce"}
             </button>
           )}
-          <button className="ge-btn" style={{ backgroundColor: '#2563eb', color: 'white' }} onClick={openCreate}>
-            + Nueva Regla
-          </button>
+          {rules.length > 0 && (
+            <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing}>
+              {syncing ? "Sincronizando..." : "🔄 Sincronizar con WP"}
+            </button>
+          )}
+          <button className="ge-btn" onClick={openCreate}>+ Nueva Regla</button>
         </div>
       </div>
 
       {/* Panel de importación desde WooCommerce */}
       {importPreview && (
-        <div className="ge-card" style={{ padding: '24px', marginBottom: '24px', borderLeft: '4px solid #7c3aed' }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: '1.1rem', fontWeight: 600, color: '#7c3aed' }}>
-            📥 Reglas encontradas en WooCommerce ({importPreview.length})
-          </h3>
-          <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 16px' }}>
+        <div className="ge-card ge-import-panel">
+          <h3 className="ge-import-title">📥 Reglas encontradas en WooCommerce ({importPreview.length})</h3>
+          <p className="ge-import-subtitle">
             Estas son las reglas actuales del plugin "Discount Rules". Importalas para manejarlas desde aquí.
           </p>
 
-          <div style={{ display: 'grid', gap: '10px', marginBottom: '16px' }}>
+          <div className="ge-rule-import-list">
             {importPreview.map((rule, idx) => (
-              <div key={idx} style={{
-                display: 'flex', alignItems: 'center', gap: '12px', padding: '12px',
-                background: '#faf5ff', borderRadius: '8px', border: '1px solid #e9d5ff'
-              }}>
-                <div style={{
-                  minWidth: '60px', textAlign: 'center', padding: '6px 10px',
-                  borderRadius: '8px', background: '#fef3c7', color: '#92400e', fontWeight: 700
-                }}>
+              <div key={idx} className="ge-rule-row preview">
+                <div className="ge-badge discount">
                   {rule.discount_value}{rule.discount_type === 'percentage' ? '%' : '$'}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{rule.title}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                <div className="ge-row-info">
+                  <div className="ge-row-title">{rule.title}</div>
+                  <div className="ge-row-subtitle">
                     {rule.applies_to === 'categories' && rule.applies_to_names?.length > 0
                       ? `Categorías: ${rule.applies_to_names.join(', ')}`
                       : 'Todos los productos'}
@@ -303,63 +367,45 @@ export default function DiscountManager() {
                     {rule.schedule_type === 'always' && ' · Siempre'}
                   </div>
                 </div>
-                <span style={{
-                  padding: '3px 8px', borderRadius: '10px', fontSize: '0.7rem', fontWeight: 600,
-                  background: rule.active ? '#dcfce7' : '#f3f4f6',
-                  color: rule.active ? '#166534' : '#9ca3af'
-                }}>
+                <span className={`ge-badge ${rule.active ? 'active' : 'inactive'}`}>
                   {rule.active ? 'Activa' : 'Inactiva'}
                 </span>
               </div>
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#7c3aed', color: 'white' }}
-              onClick={() => handleImportRules(importPreview)}
-              disabled={saving}
-            >
+          <div className="ge-form-actions">
+            <button className="ge-btn info" onClick={() => handleImportRules(importPreview)} disabled={saving}>
               {saving ? "Importando..." : `✅ Importar todas (${importPreview.length})`}
             </button>
-            <button
-              className="ge-btn"
-              style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
-              onClick={() => setImportPreview(null)}
-            >
-              Cancelar
-            </button>
+            <button className="ge-btn secondary" onClick={() => setImportPreview(null)}>Cancelar</button>
           </div>
         </div>
       )}
 
       {/* Stats rápidas */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
-        <div className="ge-card" style={{ padding: '16px', textAlign: 'center' }}>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#2563eb' }}>{rules.length}</div>
-          <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>Total reglas</div>
+      <div className="ge-stats">
+        <div className="ge-stat">
+          <div className="ge-stat-value primary">{rules.length}</div>
+          <div className="ge-stat-label">Total reglas</div>
         </div>
-        <div className="ge-card" style={{ padding: '16px', textAlign: 'center' }}>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#059669' }}>{activeCount}</div>
-          <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>Activas</div>
+        <div className="ge-stat">
+          <div className="ge-stat-value success">{activeCount}</div>
+          <div className="ge-stat-label">Activas</div>
         </div>
-        <div className="ge-card" style={{ padding: '16px', textAlign: 'center' }}>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#f59e0b' }}>{activeToday.length}</div>
-          <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>Ejecutándose hoy</div>
+        <div className="ge-stat">
+          <div className="ge-stat-value warning">{activeToday.length}</div>
+          <div className="ge-stat-label">Ejecutándose hoy</div>
         </div>
       </div>
 
       {/* Reglas activas hoy */}
       {activeToday.length > 0 && (
-        <div className="ge-card" style={{ padding: '16px', marginBottom: '20px', background: '#f0fdf4', borderLeft: '4px solid #22c55e' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#166534', marginBottom: '8px' }}>🟢 Descuentos activos hoy:</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <div className="ge-active-today">
+          <div className="ge-active-today-title">🟢 Descuentos activos hoy:</div>
+          <div className="ge-row-meta">
             {activeToday.map(r => (
-              <span key={r.id} style={{
-                padding: '4px 12px', borderRadius: '16px', fontSize: '0.8rem', fontWeight: 600,
-                background: '#dcfce7', color: '#166534'
-              }}>
+              <span key={r.id} className="ge-pill active-accent">
                 {r.title} — {r.discount_value}{r.discount_type === 'percentage' ? '%' : '$'}
               </span>
             ))}
@@ -369,324 +415,187 @@ export default function DiscountManager() {
 
       {/* Formulario crear/editar */}
       {showForm && (
-        <div className="ge-card" style={{ padding: '24px', marginBottom: '24px' }}>
-          <h3 style={{ margin: '0 0 20px', fontSize: '1.1rem', fontWeight: 600 }}>
+        <div className="ge-card pad" style={{marginBottom: 24}}>
+          <h3 className="ge-import-title" style={{color: 'var(--ge-text-dark)'}}>
             {editingRule ? "Editar Regla" : "Nueva Regla de Descuento"}
           </h3>
 
-          {/* Título */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Título de la regla</label>
-            <input
-              className="ge-input"
-              style={{ width: '100%' }}
-              placeholder="Ej: LUNES 15% EN POLLO"
-              value={form.title}
-              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            />
-          </div>
+          <div className="ge-form">
+            <div className="ge-form-group">
+              <label>Título de la regla</label>
+              <input className="ge-input" placeholder="Ej: LUNES 15% EN POLLO" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+            </div>
 
-          {/* Tipo y valor del descuento */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Tipo de descuento</label>
-              <select
-                className="ge-input"
-                style={{ width: '100%' }}
-                value={form.discount_type}
-                onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}
-              >
-                <option value="percentage">Porcentaje (%)</option>
-                <option value="fixed">Valor fijo ($)</option>
+            <div className="ge-form-row">
+              <div className="ge-form-group">
+                <label>Tipo de descuento</label>
+                <select className="ge-input" value={form.discount_type} onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}>
+                  <option value="percentage">Porcentaje (%)</option>
+                  <option value="fixed">Valor fijo ($)</option>
+                </select>
+              </div>
+              <div className="ge-form-group">
+                <label>Valor {form.discount_type === 'percentage' ? '(%)' : '($)'}</label>
+                <input type="number" className="ge-input" placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 5000"} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))} min="0" max={form.discount_type === 'percentage' ? 100 : undefined} />
+              </div>
+            </div>
+
+            {/* Aplica a */}
+            <div className="ge-form-group">
+              <label>Aplica a</label>
+              <select className="ge-input" value={form.applies_to} onChange={e => setForm(f => ({ ...f, applies_to: e.target.value, applies_to_ids: [], applies_to_names: [] }))}>
+                <option value="all">Todos los productos</option>
+                <option value="categories">Categorías específicas</option>
+                <option value="products">Productos específicos (SKU)</option>
               </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
-                Valor {form.discount_type === 'percentage' ? '(%)' : '($)'}
-              </label>
-              <input
-                type="number"
-                className="ge-input"
-                style={{ width: '100%' }}
-                placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 5000"}
-                value={form.discount_value}
-                onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))}
-                min="0"
-                max={form.discount_type === 'percentage' ? 100 : undefined}
-              />
-            </div>
-          </div>
 
-          {/* Aplica a */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Aplica a</label>
-            <select
-              className="ge-input"
-              style={{ width: '100%', marginBottom: '8px' }}
-              value={form.applies_to}
-              onChange={e => setForm(f => ({ ...f, applies_to: e.target.value, applies_to_ids: [], applies_to_names: [] }))}
-            >
-              <option value="all">Todos los productos</option>
-              <option value="categories">Categorías específicas</option>
-            </select>
+              {form.applies_to === "categories" && (
+                <div style={{marginTop: 8}}>
+                  <div className="ge-row-meta" style={{marginBottom: 8}}>
+                    {form.applies_to_names.map((name, idx) => (
+                      <span key={idx} className="ge-chip category">
+                        {name}
+                        <button className="ge-chip-remove" onClick={() => removeCategory(idx)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <input className="ge-input" placeholder="Buscar categoría..." value={categorySearch} onChange={e => setCategorySearch(e.target.value)} />
+                  {categorySearch && (
+                    <div className="ge-dropdown">
+                      {filteredCategories.length === 0 ? (
+                        <div className="ge-dropdown-empty">No se encontraron categorías</div>
+                      ) : (
+                        filteredCategories.slice(0, 10).map(cat => (
+                          <div key={cat.id} className="ge-dropdown-item" onClick={() => addCategory(cat)}>{cat.name}</div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
-            {form.applies_to === "categories" && (
-              <div>
-                {/* Chips de categorías seleccionadas */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                  {form.applies_to_names.map((name, idx) => (
-                    <span key={idx} style={{
-                      display: 'flex', alignItems: 'center', gap: '4px',
-                      padding: '4px 10px', borderRadius: '16px', fontSize: '0.8rem',
-                      background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe'
-                    }}>
-                      {name}
-                      <button
-                        onClick={() => removeCategory(idx)}
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontWeight: 700, fontSize: '0.85rem', padding: '0 2px' }}
-                      >×</button>
-                    </span>
+              {form.applies_to === "products" && (
+                <div style={{marginTop: 8}}>
+                  <div className="ge-row-meta" style={{marginBottom: 8}}>
+                    {form.applies_to_names.map((name, idx) => (
+                      <span key={idx} className="ge-chip product">
+                        {name}
+                        <button className="ge-chip-remove" onClick={() => removeProduct(idx)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <input className="ge-input" placeholder="Buscar producto por nombre o SKU..." value={productSearch} onChange={e => handleProductSearch(e.target.value)} />
+                  {searchingProducts && <div className="ge-form-help">Buscando...</div>}
+                  {productResults.length > 0 && (
+                    <div className="ge-dropdown">
+                      {productResults.map(prod => (
+                        <div key={prod.id} className="ge-dropdown-item" onClick={() => addProduct(prod)}>
+                          <span className="ge-dropdown-item-main">{prod.name}</span>
+                          {prod.sku && <span className="ge-dropdown-item-sub">SKU: {prod.sku}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Programación */}
+            <div className="ge-form-group">
+              <label>Programación</label>
+              <select className="ge-input" value={form.schedule_type} onChange={e => setForm(f => ({ ...f, schedule_type: e.target.value }))}>
+                <option value="days">Días de la semana</option>
+                <option value="date_range">Rango de fechas</option>
+                <option value="always">Siempre activo</option>
+              </select>
+
+              {form.schedule_type === "days" && (
+                <div className="ge-row-meta" style={{marginTop: 12}}>
+                  {DAYS.map(day => (
+                    <button key={day.value} type="button" onClick={() => toggleDay(day.value)} className={`ge-day-btn ${form.schedule_days.includes(day.value) ? 'active' : ''}`}>
+                      {day.label}
+                    </button>
                   ))}
                 </div>
-                {/* Buscador de categorías */}
-                <input
-                  className="ge-input"
-                  style={{ width: '100%' }}
-                  placeholder="Buscar categoría..."
-                  value={categorySearch}
-                  onChange={e => setCategorySearch(e.target.value)}
-                />
-                {categorySearch && (
-                  <div style={{
-                    maxHeight: '150px', overflow: 'auto', border: '1px solid #e5e7eb',
-                    borderRadius: '8px', marginTop: '4px', background: 'white'
-                  }}>
-                    {filteredCategories.length === 0 ? (
-                      <div style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#9ca3af' }}>No se encontraron categorías</div>
-                    ) : (
-                      filteredCategories.slice(0, 10).map(cat => (
-                        <div
-                          key={cat.id}
-                          onClick={() => addCategory(cat)}
-                          style={{
-                            padding: '8px 12px', cursor: 'pointer', fontSize: '0.85rem',
-                            borderBottom: '1px solid #f3f4f6', transition: 'background 0.1s'
-                          }}
-                          onMouseEnter={e => e.target.style.background = '#f9fafb'}
-                          onMouseLeave={e => e.target.style.background = 'white'}
-                        >
-                          {cat.name}
-                        </div>
-                      ))
-                    )}
+              )}
+
+              {form.schedule_type === "date_range" && (
+                <div className="ge-form-row" style={{marginTop: 12}}>
+                  <div className="ge-form-group">
+                    <label className="ge-form-help">Fecha inicio</label>
+                    <input type="date" className="ge-input" value={form.date_start} onChange={e => setForm(f => ({ ...f, date_start: e.target.value }))} />
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Programación */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Programación</label>
-            <select
-              className="ge-input"
-              style={{ width: '100%', marginBottom: '12px' }}
-              value={form.schedule_type}
-              onChange={e => setForm(f => ({ ...f, schedule_type: e.target.value }))}
-            >
-              <option value="days">Días de la semana</option>
-              <option value="date_range">Rango de fechas</option>
-              <option value="always">Siempre activo</option>
-            </select>
-
-            {form.schedule_type === "days" && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {DAYS.map(day => (
-                  <button
-                    key={day.value}
-                    type="button"
-                    onClick={() => toggleDay(day.value)}
-                    style={{
-                      padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
-                      border: form.schedule_days.includes(day.value) ? '2px solid #2563eb' : '2px solid #e5e7eb',
-                      background: form.schedule_days.includes(day.value) ? '#eff6ff' : 'white',
-                      color: form.schedule_days.includes(day.value) ? '#1d4ed8' : '#6b7280',
-                      fontWeight: form.schedule_days.includes(day.value) ? 600 : 400,
-                      fontSize: '0.85rem', transition: 'all 0.15s'
-                    }}
-                  >
-                    {day.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {form.schedule_type === "date_range" && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Fecha inicio</label>
-                  <input
-                    type="date"
-                    className="ge-input"
-                    style={{ width: '100%' }}
-                    value={form.date_start}
-                    onChange={e => setForm(f => ({ ...f, date_start: e.target.value }))}
-                  />
+                  <div className="ge-form-group">
+                    <label className="ge-form-help">Fecha fin</label>
+                    <input type="date" className="ge-input" value={form.date_end} onChange={e => setForm(f => ({ ...f, date_end: e.target.value }))} />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', color: '#6b7280' }}>Fecha fin</label>
-                  <input
-                    type="date"
-                    className="ge-input"
-                    style={{ width: '100%' }}
-                    value={form.date_end}
-                    onChange={e => setForm(f => ({ ...f, date_end: e.target.value }))}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {/* Active + Order */}
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={form.active}
-                onChange={e => setForm(f => ({ ...f, active: e.target.checked }))}
-              />
-              Activa
-            </label>
-          </div>
+            <div className="ge-row-meta">
+              <label className="ge-form-check">
+                <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} /> Activa
+              </label>
+            </div>
 
-          {/* Botones */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              className="ge-btn"
-              style={{ backgroundColor: '#2563eb', color: 'white' }}
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? "Guardando..." : (editingRule ? "Actualizar Regla" : "Crear Regla")}
-            </button>
-            <button
-              className="ge-btn"
-              style={{ background: 'white', color: '#374151', border: '1px solid #d1d5db' }}
-              onClick={resetForm}
-            >
-              Cancelar
-            </button>
+            <div className="ge-form-actions">
+              <button className="ge-btn" onClick={handleSave} disabled={saving}>
+                {saving ? "Guardando..." : (editingRule ? "Actualizar Regla" : "Crear Regla")}
+              </button>
+              <button className="ge-btn secondary" onClick={resetForm}>Cancelar</button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Lista de reglas */}
       {loading ? (
-        <div className="ge-card" style={{ padding: '40px', textAlign: 'center' }}>Cargando reglas...</div>
+        <div className="ge-card ge-empty">Cargando reglas...</div>
       ) : rules.length === 0 ? (
-        <div className="ge-card" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>
-          No hay reglas de descuento. Crea la primera.
-        </div>
+        <div className="ge-card ge-empty">No hay reglas de descuento. Crea la primera.</div>
       ) : (
-        <div style={{ display: 'grid', gap: '12px' }}>
+        <div className="ge-card">
           {rules.map(rule => {
             const activeNow = isActiveToday(rule);
             return (
-              <div
-                key={rule.id}
-                className="ge-card"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '16px', padding: '16px',
-                  opacity: rule.active ? 1 : 0.5, transition: 'opacity 0.2s',
-                  borderLeft: activeNow ? '4px solid #22c55e' : '4px solid transparent'
-                }}
-              >
-                {/* Discount badge */}
-                <div style={{
-                  minWidth: '70px', textAlign: 'center', padding: '8px 12px',
-                  borderRadius: '10px', background: '#fef3c7', color: '#92400e', fontWeight: 700
-                }}>
-                  <div style={{ fontSize: '1.3rem' }}>
-                    {rule.discount_value}{rule.discount_type === 'percentage' ? '%' : '$'}
-                  </div>
-                  <div style={{ fontSize: '0.65rem', textTransform: 'uppercase' }}>
-                    {rule.discount_type === 'percentage' ? 'desc.' : 'fijo'}
-                  </div>
+              <div key={rule.id} className={`ge-rule-row ${rule.active ? '' : 'dimmed'} ${activeNow ? 'running' : ''}`}>
+                <div className="ge-badge discount">
+                  <div className="ge-badge-value">{rule.discount_value}{rule.discount_type === 'percentage' ? '%' : '$'}</div>
+                  <div className="ge-badge-label">{rule.discount_type === 'percentage' ? 'desc.' : 'fijo'}</div>
                 </div>
 
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '4px' }}>
-                    {rule.title}
-                  </div>
-                  {/* Categorías */}
+                <div className="ge-row-info">
+                  <div className="ge-row-title">{rule.title}</div>
                   {rule.applies_to === "categories" && (rule.applies_to_names || []).length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
-                      {rule.applies_to_names.map((name, i) => (
-                        <span key={i} style={{
-                          padding: '2px 8px', borderRadius: '10px', fontSize: '0.7rem',
-                          background: '#eff6ff', color: '#2563eb'
-                        }}>{name}</span>
-                      ))}
+                    <div className="ge-row-meta">
+                      {rule.applies_to_names.map((name, i) => <span key={i} className="ge-chip category">{name}</span>)}
                     </div>
                   )}
-                  {rule.applies_to === "all" && (
-                    <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Aplica a todos los productos</span>
+                  {rule.applies_to === "products" && (rule.applies_to_names || []).length > 0 && (
+                    <div className="ge-row-meta">
+                      {rule.applies_to_names.slice(0, 5).map((name, i) => <span key={i} className="ge-chip product">{name}</span>)}
+                      {rule.applies_to_names.length > 5 && <span className="ge-row-subtitle">+{rule.applies_to_names.length - 5} más</span>}
+                    </div>
                   )}
-                  {/* Schedule */}
-                  <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '2px' }}>
-                    {rule.schedule_type === "days" && (
-                      <>📅 {(rule.schedule_days || []).map(d => DAY_LABELS[d]).join(', ')}</>
-                    )}
-                    {rule.schedule_type === "date_range" && (
-                      <>📆 {rule.date_start} → {rule.date_end}</>
-                    )}
+                  {rule.applies_to === "all" && <div className="ge-row-subtitle">Aplica a todos los productos</div>}
+                  <div className="ge-row-subtitle">
+                    {rule.schedule_type === "days" && <>📅 {(rule.schedule_days || []).map(d => DAY_LABELS[d]).join(', ')}</>}
+                    {rule.schedule_type === "date_range" && <>📆 {rule.date_start} → {rule.date_end}</>}
                     {rule.schedule_type === "always" && <>🔄 Siempre activo</>}
+                    {' '}🌐 Todas las sedes
                   </div>
                 </div>
 
-                {/* Status */}
-                <div style={{ textAlign: 'center' }}>
-                  {activeNow && (
-                    <div style={{
-                      padding: '3px 10px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: 600,
-                      background: '#dcfce7', color: '#166534', marginBottom: '4px'
-                    }}>
-                      Ejecutándose
-                    </div>
-                  )}
-                  <span style={{
-                    padding: '3px 10px', borderRadius: '12px', fontSize: '0.7rem', fontWeight: 600,
-                    background: rule.active ? '#dbeafe' : '#f3f4f6',
-                    color: rule.active ? '#1d4ed8' : '#9ca3af'
-                  }}>
-                    {rule.active ? 'Activa' : 'Inactiva'}
-                  </span>
+                <div className="ge-rule-status">
+                  {activeNow && <span className="ge-badge running">Ejecutándose</span>}
+                  <span className={`ge-badge ${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Activa' : 'Inactiva'}</span>
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                  <button
-                    className="ge-btn"
-                    style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #d1d5db', color: '#374151' }}
-                    onClick={() => handleToggleActive(rule)}
-                  >
-                    {rule.active ? '⏸' : '▶'}
-                  </button>
-                  <button
-                    className="ge-btn"
-                    style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #2563eb', color: '#2563eb' }}
-                    onClick={() => openEdit(rule)}
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    className="ge-btn"
-                    style={{ padding: '6px 10px', fontSize: '0.8rem', background: 'white', border: '1px solid #ef4444', color: '#ef4444' }}
-                    onClick={() => handleDelete(rule.id)}
-                  >
-                    🗑️
-                  </button>
+                <div className="ge-row-actions">
+                  <button className="ge-btn icon outline-muted" onClick={() => handleToggleActive(rule)}>{rule.active ? '⏸' : '▶'}</button>
+                  <button className="ge-btn icon outline-primary" onClick={() => openEdit(rule)}>✏️</button>
+                  <button className="ge-btn icon outline-danger" onClick={() => handleDelete(rule.id)}>🗑️</button>
                 </div>
               </div>
             );
@@ -695,11 +604,15 @@ export default function DiscountManager() {
       )}
 
       {/* Nota */}
-      <div className="ge-card" style={{ padding: '16px', marginTop: '20px', background: '#fffbeb', borderLeft: '4px solid #f59e0b' }}>
-        <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>💡 Integración WordPress</div>
-        <div style={{ fontSize: '0.8rem', color: '#78716c', lineHeight: 1.5 }}>
-          Las reglas se aplicarán automáticamente en la tienda cuando el plugin de WordPress esté instalado.
-          Los descuentos se activan/desactivan según el día de la semana o rango de fechas configurado.
+      <div className="ge-note">
+        <div className="ge-note-title">💡 Integración con FlyCart (Discount Rules)</div>
+        <div className="ge-note-body">
+          Pulsa <strong>"🔄 Sincronizar con WP"</strong> para enviar las reglas al plugin FlyCart en WordPress.
+          El plugin se encarga de mostrar badges de descuento, precios tachados y toda la presentación visual en la tienda.
+          Las reglas se activan/desactivan según el día de la semana o rango de fechas configurado.
+          <br/><br/>
+          <strong>⚠️ Nota:</strong> Los descuentos aplican a <strong>todas las sedes por igual</strong> porque el plugin FlyCart
+          no soporta descuentos por sede. Para diferenciar por sede, usa categorías o productos específicos de cada sede.
         </div>
       </div>
     </div>

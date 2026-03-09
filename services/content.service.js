@@ -2,16 +2,24 @@ import supabase from "../supabaseClient.js";
 
 // --- SERVICIO DE BANNERS ---
 
-export async function getBanners(section = 'home_slider') {
+export async function getBanners(section = 'home_slider', sede = null) {
     try {
-        const { data, error } = await supabase
+        let query = supabase
             .from('content_banners')
             .select('*')
             .eq('section', section)
             .order('display_order', { ascending: true });
             
+        const { data, error } = await query;
         if(error) throw error;
-        return { ok: true, data };
+
+        // Filtrar por sede: mostrar banners donde sedes=null (todas) o que incluyan la sede
+        let filtered = data;
+        if (sede) {
+            filtered = data.filter(b => !b.sedes || b.sedes.includes(sede));
+        }
+
+        return { ok: true, data: filtered };
     } catch (e) {
         console.error("Error getBanners:", e);
         return { ok: false, message: e.message };
