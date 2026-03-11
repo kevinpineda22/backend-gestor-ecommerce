@@ -7,8 +7,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(15, 23, 42, 0.65);
-    /* More contrast */
+    background-color: rgba(15, 23, 42, 0.65); /* More contrast */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -23,24 +22,16 @@
     height: 92vh;
     max-width: 1600px;
     border-radius: 12px;
-    box-shadow: 0 50px 100px -20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 50px 100px -20px rgba(0,0,0,0.3);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    /* Important for flex children scrolling */
+    overflow: hidden; /* Important for flex children scrolling */
     animation: cmSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes cmSlideUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px) scale(0.98);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
+    from { opacity: 0; transform: translateY(20px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* --- HEADER & TABS --- */
@@ -80,7 +71,6 @@
     align-items: center;
     justify-content: center;
 }
-
 .cm-close-btn:hover {
     background: #f1f5f9;
     color: #ef4444;
@@ -91,15 +81,13 @@
     gap: 40px;
     padding: 0 24px;
     margin-top: 8px;
-    justify-content: center;
-    /* CENTRADO */
+    justify-content: center; /* CENTRADO */
 }
 
 .cm-tab {
     background: none;
     border: none;
-    padding: 12px 16px;
-    /* Más área de click */
+    padding: 12px 16px; /* Más área de click */
     font-size: 1rem;
     font-weight: 600;
     color: #64748b;
@@ -110,8 +98,7 @@
     align-items: center;
     gap: 10px;
     position: relative;
-    top: 1px;
-    /* Para que el borde pise la línea del header */
+    top: 1px; /* Para que el borde pise la línea del header */
 }
 
 .cm-tab:hover {
@@ -129,8 +116,7 @@
     flex: 1;
     overflow-y: auto;
     padding: 24px;
-    background: #f1f5f9;
-    /* Contrast background */
+    background: #f1f5f9; /* Contrast background */
 }
 
 /* --- TABS CONTENT CONTAINERS --- */
@@ -146,8 +132,7 @@
 /* --- GRID SYSTEMS --- */
 .cm-grid-2-col {
     display: grid;
-    grid-template-columns: 350px 1fr;
-    /* Fixed Left sidebar look */
+    grid-template-columns: 350px 1fr; /* Fixed Left sidebar look */
     gap: 40px;
     align-items: start;
 }
@@ -205,8 +190,7 @@
     background-repeat: no-repeat;
     background-position: 10px center;
     background-size: 18px;
-    padding-left: 36px;
-    /* Space for icon */
+    padding-left: 36px; /* Space for icon */
 }
 
 /* --- UPLOAD BOX ENHANCED --- */
@@ -234,7 +218,7 @@
     max-width: 90%;
     max-height: 380px;
     object-fit: contain;
-    filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.1));
+    filter: drop-shadow(0 10px 15px rgba(0,0,0,0.1));
 }
 
 .cm-upload-overlay {
@@ -250,7 +234,6 @@
     opacity: 0;
     transition: opacity 0.2s;
 }
-
 .cm-upload-box.large:hover .cm-upload-overlay {
     opacity: 1;
 }
@@ -275,7 +258,6 @@
     justify-content: space-between;
     align-items: center;
 }
-
 .cm-column-header label {
     font-size: 0.85rem;
     font-weight: 700;
@@ -301,7 +283,6 @@
 .cm-scroll-list.large::-webkit-scrollbar {
     width: 6px;
 }
-
 .cm-scroll-list.large::-webkit-scrollbar-thumb {
     background-color: #cbd5e1;
     border-radius: 20px;
@@ -338,13 +319,12 @@
 }
 
 /* Checkbox alignment correction */
-.cm-list-item input[type="checkbox"],
+.cm-list-item input[type="checkbox"], 
 .cm-list-item input[type="radio"] {
     accent-color: #2563eb;
     width: 18px;
     height: 18px;
-    margin-top: 2px;
-    /* Slight alignment fix with text */
+    margin-top: 2px; /* Slight alignment fix with text */
     cursor: pointer;
     flex-shrink: 0;
 }
@@ -377,7 +357,6 @@
     padding: 2px 6px;
     border-radius: 4px;
 }
-
 .cm-list-item.selected .cm-item-subtext {
     background: #dbeafe;
     color: #2563eb;
@@ -399,7 +378,6 @@
     border-bottom: 2px solid #e2e8f0;
     margin-bottom: 8px;
 }
-
 .cm-group-header:first-child {
     padding-top: 4px;
 }
@@ -415,13 +393,11 @@
     transition: all 0.2s;
     overflow: hidden;
 }
-
 .cm-list-item-row:hover {
     border-color: #93c5fd;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     background: #f0f9ff;
 }
-
 .cm-list-item-row.selected {
     background: #eff6ff;
     border-color: #3b82f6;
@@ -437,7 +413,6 @@
     cursor: pointer;
     margin: 0;
 }
-
 .cm-list-item-clickable input {
     accent-color: #2563eb;
     width: 18px;
@@ -459,13 +434,21 @@
     font-size: 1.1rem;
     transition: all 0.2s;
 }
-
 .cm-delete-icon-btn:hover {
     background: #fef2f2;
     color: #ef4444;
 }
 
-/* Footer is defined below with button styles */
+/* --- FOOTER --- */
+.cm-modal-footer {
+    background: white;
+    padding: 20px 32px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 16px;
+    border-radius: 0 0 12px 12px;
+}
 
 .cm-btn.large-btn {
     padding: 12px 24px;
@@ -484,15 +467,13 @@
 
 /* --- ERP SUGGESTION --- */
 .cm-suggestion-box {
-    background: #f0fdfa;
-    /* Teal tint */
+    background: #f0fdfa; /* Teal tint */
     border: 1px solid #ccfbf1;
     border-left: 4px solid #14b8a6;
     border-radius: 8px;
     padding: 16px 20px;
     margin-bottom: 20px;
 }
-
 .cm-suggestion-title {
     color: #0f766e;
     font-weight: 700;
@@ -507,7 +488,7 @@
     border-radius: 20px;
     font-size: 0.85rem;
     font-weight: 600;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     transition: all 0.2s;
     border: 1px solid transparent;
 }
@@ -532,11 +513,11 @@
 
 .cm-badge:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
 }
 
 .cm-badge-remove {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(0,0,0,0.05);
     border: none;
     border-radius: 50%;
     width: 20px;
@@ -552,9 +533,8 @@
     opacity: 0.7;
     transition: all 0.2s;
 }
-
 .cm-badge-remove:hover {
-    background: rgba(0, 0, 0, 0.15);
+    background: rgba(0,0,0,0.15);
     opacity: 1;
 }
 
@@ -564,15 +544,8 @@
 }
 
 @keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(6px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 
@@ -588,8 +561,7 @@
     border-radius: 12px;
     background: white;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-    overflow: hidden;
-    /* For header border radius */
+    overflow: hidden; /* For header border radius */
     display: flex;
     flex-direction: column;
 }
@@ -604,13 +576,12 @@
     font-size: 0.9rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    border-bottom: 1px solid rgba(0,0,0,0.05);
 }
 
 .cm-card-erp {
     border: 1px solid #ccfbf1;
 }
-
 .cm-card-erp .cm-card-header {
     background: #f0fdfa;
     color: #0d9488;
@@ -619,7 +590,6 @@
 .cm-card-selection {
     border: 1px solid #e0e7ff;
 }
-
 .cm-card-selection .cm-card-header {
     background: #eef2ff;
     color: #4f46e5;
@@ -638,16 +608,13 @@
     border-bottom: 1px dashed #e2e8f0;
     font-size: 0.95rem;
 }
-
 .cm-data-row:last-child {
     border-bottom: none;
 }
-
 .cm-data-label {
     color: #64748b;
     font-weight: 500;
 }
-
 .cm-data-value {
     color: #0f172a;
     font-weight: 700;
@@ -696,7 +663,6 @@
     padding: 12px 24px;
     font-weight: 600;
 }
-
 .cm-btn-secondary:hover {
     background: #f8fafc;
     color: #334155;
@@ -704,18 +670,16 @@
 }
 
 .cm-btn-primary {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    background:linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     color: white;
     padding: 12px 32px;
     font-weight: 600;
     box-shadow: 0 4px 6px rgba(37, 99, 235, 0.2);
 }
-
 .cm-btn-primary:hover:not(:disabled) {
     transform: translateY(-2px);
     box-shadow: 0 6px 10px rgba(37, 99, 235, 0.3);
 }
-
 .cm-btn-primary:disabled {
     opacity: 0.7;
     cursor: not-allowed;

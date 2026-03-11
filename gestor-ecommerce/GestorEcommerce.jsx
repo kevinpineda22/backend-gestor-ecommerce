@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { FaArrowLeft, FaChartBar, FaBoxOpen, FaSearchDollar, FaImages, FaTags, FaCog, FaTruck } from 'react-icons/fa';
 import LiveComparison from './components/LiveComparison';
 import DashboardGestorEcommerce from './components/DashboardGestorEcommerce';
 import CatalogManager from './CatalogManager';
 import BannerManager from './components/BannerManager';
 import DiscountManager from './components/DiscountManager';
+import LogisticsManager from './components/LogisticsManager';
 import { fetchSedes } from './services';
 import './GestorEcommerce.css';
 
@@ -68,6 +71,8 @@ const GestorEcommerce = () => {
         return <BannerManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'discounts':
         return <DiscountManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
+      case 'logistics':
+        return <LogisticsManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'settings':
         return <div className="ge-card ge-empty">Configuración en construcción...</div>;
       default:
@@ -82,43 +87,71 @@ const GestorEcommerce = () => {
       {sidebarOpen && <div className="ge-sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
 
       <aside className={`ge-sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <div className="ge-brand">
-          <h1>Ecom<span>Manager</span></h1>
+        <div className="ge-sidebar-header">
+          <Link to="/acceso" className="ge-back-button"><FaArrowLeft /></Link>
+          <div className="ge-sidebar-logo">EM</div>
+          <h2 className="ge-sidebar-title">EcomManager</h2>
         </div>
 
-        {esAdminGlobal && sedes.length > 1 && (
-          <div className="ge-sidebar-section">
-            <label className="ge-sidebar-label">Sede</label>
-            <select className="ge-select" value={sedeActual?.id || ''} onChange={(e) => handleSedeChange(e.target.value)}>
-              {sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+        {/* Sede Selector */}
+        <div className="ge-sede-selector">
+          <div className="ge-sede-selector-label">
+            {esAdminGlobal ? '👑 Admin Global' : '🏪 Encargado'}
+          </div>
+          {esAdminGlobal && sedes.length > 1 ? (
+            <select
+              className="ge-sede-select"
+              value={sedeActual?.id || ''}
+              onChange={(e) => handleSedeChange(e.target.value)}
+            >
+              {sedes.map(s => (
+                <option key={s.id} value={s.id}>{s.nombre}</option>
+              ))}
             </select>
-          </div>
-        )}
-
-        {!esAdminGlobal && sedeActual && (
-          <div className="ge-sidebar-section">
-            <label className="ge-sidebar-label">Sede</label>
-            <div className="ge-sidebar-sede-name">{sedeActual.nombre}</div>
-          </div>
-        )}
-
-        <nav className="ge-nav">
-          {[
-            { key: 'dashboard', icon: '📊', label: 'Dashboard' },
-            { key: 'catalog', icon: '📦', label: 'Catálogo' },
-            { key: 'audit', icon: '💰', label: 'Auditoría Precios' },
-            { key: 'banners', icon: '🖼️', label: 'Banners' },
-            { key: 'discounts', icon: '🏷️', label: 'Descuentos' },
-            { key: 'settings', icon: '⚙️', label: 'Configuración' },
-          ].map(item => (
-            <div key={item.key} className={`ge-nav-item ${activeTab === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
-              <span>{item.icon}</span> {item.label}
+          ) : sedeActual ? (
+            <div className="ge-sede-current">
+              <span className="ge-sede-current-dot"></span>
+              <span className="ge-sede-current-name">{sedeActual.nombre}</span>
             </div>
-          ))}
+          ) : null}
+        </div>
+
+        <nav className="ge-sidebar-nav">
+          <div className="ge-nav-label">GENERAL</div>
+          <button className={`ge-nav-button ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('dashboard')}>
+            <FaChartBar /> <span>Dashboard</span>
+          </button>
+          <button className={`ge-nav-button ${activeTab === 'catalog' ? 'active' : ''}`} onClick={() => navigate('catalog')}>
+            <FaBoxOpen /> <span>Catálogo</span>
+          </button>
+
+          <div className="ge-nav-label spacer">AUDITORÍA</div>
+          <button className={`ge-nav-button ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => navigate('audit')}>
+            <FaSearchDollar /> <span>Auditoría Precios</span>
+          </button>
+
+          <div className="ge-nav-label spacer">CONTENIDO</div>
+          <button className={`ge-nav-button ${activeTab === 'banners' ? 'active' : ''}`} onClick={() => navigate('banners')}>
+            <FaImages /> <span>Banners</span>
+          </button>
+          <button className={`ge-nav-button ${activeTab === 'discounts' ? 'active' : ''}`} onClick={() => navigate('discounts')}>
+            <FaTags /> <span>Descuentos</span>
+          </button>
+
+          <div className="ge-nav-label spacer">OPERACIONES</div>
+          <button className={`ge-nav-button ${activeTab === 'logistics' ? 'active' : ''}`} onClick={() => navigate('logistics')}>
+            <FaTruck /> <span>Logística</span>
+          </button>
+
+          <div className="ge-nav-label spacer">SISTEMA</div>
+          <button className={`ge-nav-button ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}>
+            <FaCog /> <span>Configuración</span>
+          </button>
         </nav>
 
         <div className="ge-sidebar-footer">
-          {empleado.nombre || 'Usuario'} {sedeActual ? `— ${sedeActual.nombre}` : ''}
+          <div className="ge-footer-name">{empleado.nombre || 'Usuario'}</div>
+          <div className="ge-footer-role">{esAdminGlobal ? '👑 Admin Global' : sedeActual?.nombre || ''}</div>
         </div>
       </aside>
 

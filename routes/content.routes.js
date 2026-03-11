@@ -87,4 +87,26 @@ router.delete('/discounts/:id', async (req, res) => {
     }
 });
 
+// ═══════ CONFIGURACIÓN LOGÍSTICA ═══════
+
+// GET /api/content/logistics/:sedeCode
+router.get('/logistics/:sedeCode', async (req, res) => {
+    try {
+        const result = await contentService.getLogisticsConfig(req.params.sedeCode);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
+// PUT /api/content/logistics/:sedeCode
+router.put('/logistics/:sedeCode', async (req, res) => {
+    try {
+        const result = await contentService.saveLogisticsConfig(req.params.sedeCode, req.body);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
 export default router;

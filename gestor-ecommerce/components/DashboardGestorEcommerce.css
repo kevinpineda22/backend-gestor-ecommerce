@@ -23,7 +23,59 @@
   margin-bottom: 16px;
 }
 
+/* ═══════ STAT CARDS ═══════ */
+.ge-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-bottom: 0px;
+}
 
+.ge-stat-card {
+  background: var(--ge-bg-white);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--ge-border-light);
+  transition: transform 0.2s;
+}
+
+.ge-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+}
+
+.ge-stat-card.primary-card {
+  background: linear-gradient(135deg, var(--ge-primary) 0%, var(--ge-primary-dark) 100%);
+  color: white;
+  border: none;
+}
+
+.ge-stat-card.primary-card h3,
+.ge-stat-card.primary-card .ge-stat-value,
+.ge-stat-card.primary-card .ge-stat-desc {
+  color: white !important;
+}
+
+.ge-stat-card h3 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ge-text-muted);
+  margin: 0 0 8px 0;
+}
+
+.ge-stat-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--ge-text-dark);
+  margin-bottom: 4px;
+  line-height: 1.1;
+}
+
+.ge-stat-desc {
+  font-size: 0.875rem;
+  color: var(--ge-text-light);
+}
 
 /* ═══════ ACTION CARDS ═══════ */
 .ge-dashboard-actions {

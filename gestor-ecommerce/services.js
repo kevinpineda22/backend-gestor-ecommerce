@@ -229,3 +229,18 @@ export async function syncDiscountRulesToWP(wpUrl, rules) {
   });
   return res.json();
 }
+
+// --- CONFIGURACIÓN LOGÍSTICA POR SEDE ---
+export async function fetchLogisticsConfig(sedeCode) {
+  const res = await fetch(`${API_URL}/content/logistics/${encodeURIComponent(sedeCode)}`);
+  return res.json();
+}
+
+export async function saveLogisticsConfig(sedeCode, config) {
+  const res = await fetch(`${API_URL}/content/logistics/${encodeURIComponent(sedeCode)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config)
+  });
+  return res.json();
+}

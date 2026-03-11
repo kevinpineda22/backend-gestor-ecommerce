@@ -180,7 +180,7 @@ function merkahorro_slider_shortcode($atts) {
         <?php foreach ($banners as $i => $banner): ?>
             <div class="mks-slide <?php echo $i === 0 ? 'active' : ''; ?>">
                 <?php if (!empty($banner['link_url'])): ?>
-                    <a href="<?php echo esc_url($banner['link_url']); ?>">
+                    <a href="<?php echo esc_url($banner['link_url']); ?>" target="_blank" rel="noopener noreferrer">
                         <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="<?php echo $i === 0 ? 'eager' : 'lazy'; ?>">
                     </a>
                 <?php else: ?>
@@ -324,7 +324,7 @@ function merkahorro_tiles_shortcode($atts) {
             <?php foreach ($banners as $banner): ?>
                 <div class="mks-tile">
                     <?php if (!empty($banner['link_url'])): ?>
-                        <a href="<?php echo esc_url($banner['link_url']); ?>">
+                        <a href="<?php echo esc_url($banner['link_url']); ?>" target="_blank" rel="noopener noreferrer">
                             <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="lazy">
                         </a>
                     <?php else: ?>

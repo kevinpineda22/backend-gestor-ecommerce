@@ -125,3 +125,43 @@ export async function deleteDiscountRule(id) {
         return { ok: false, message: e.message };
     }
 }
+
+// --- SERVICIO DE CONFIGURACIÓN LOGÍSTICA ---
+
+export async function getLogisticsConfig(sedeCode) {
+    try {
+        const { data, error } = await supabase
+            .from('logistics_config')
+            .select('*')
+            .eq('sede_code', sedeCode)
+            .single();
+
+        if (error && error.code === 'PGRST116') {
+            // No row found
+            return { ok: false, message: 'no_config' };
+        }
+        if (error) throw error;
+        return { ok: true, data: data.config };
+    } catch (e) {
+        console.error("Error getLogisticsConfig:", e);
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function saveLogisticsConfig(sedeCode, config) {
+    try {
+        const { error } = await supabase
+            .from('logistics_config')
+            .upsert({
+                sede_code: sedeCode,
+                config,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'sede_code' });
+
+        if (error) throw error;
+        return { ok: true };
+    } catch (e) {
+        console.error("Error saveLogisticsConfig:", e);
+        return { ok: false, message: e.message };
+    }
+}

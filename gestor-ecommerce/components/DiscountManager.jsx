@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchDiscountRules, createDiscountRule, updateDiscountRule, deleteDiscountRule, fetchCategories, syncDiscountRulesToWP, SEDE_WP_URLS } from "../services";
+import { fetchDiscountRules, createDiscountRule, updateDiscountRule, deleteDiscountRule, syncDiscountRulesToWP, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 import "./DiscountManager.css";
 const DAYS = [
@@ -14,11 +14,25 @@ const DAYS = [
 
 const DAY_LABELS = { 0: "Dom", 1: "Lun", 2: "Mar", 3: "Mié", 4: "Jue", 5: "Vie", 6: "Sáb" };
 
+const SEDE_LABELS = {
+  'PV001': 'Copacabana (Principal)',
+  '00301': 'Girardota',
+  '00701': 'Barbosa',
+  '00201': 'Villahermosa',
+};
+
+const SEDE_ICONS = {
+  'PV001': '🏪',
+  '00301': '🏬',
+  '00701': '🛒',
+  '00201': '🏠',
+};
+
 const EMPTY_FORM = {
   title: "",
   discount_type: "percentage",
   discount_value: 0,
-  applies_to: "categories",
+  applies_to: "products",
   applies_to_ids: [],
   applies_to_names: [],
   schedule_type: "days",
@@ -27,29 +41,31 @@ const EMPTY_FORM = {
   date_end: "",
   active: true,
   display_order: 0,
+  sedes: null, // null = todas, array = específicas
 };
 
 export default function DiscountManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
+  const userSedeCode = sedeActual?.codigo_siesa || sedeActual?.slug || null;
   const [rules, setRules] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [categorySearch, setCategorySearch] = useState("");
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [syncSedes, setSyncSedes] = useState(Object.keys(SEDE_WP_URLS));
+  const [syncSedes, setSyncSedes] = useState(
+    esAdminGlobal ? Object.keys(SEDE_WP_URLS) : (userSedeCode ? [userSedeCode] : Object.keys(SEDE_WP_URLS))
+  );
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState([]);
   const [searchingProducts, setSearchingProducts] = useState(false);
+  const [uploadingSKUs, setUploadingSKUs] = useState(false);
 
   useEffect(() => {
     loadRules();
-    loadCategories();
   }, []);
 
   const loadRules = async () => {
@@ -61,15 +77,6 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       console.error("Error cargando reglas:", err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadCategories = async () => {
-    try {
-      const res = await fetchCategories();
-      if (res.ok) setCategories(res.data || []);
-    } catch (err) {
-      console.error("Error cargando categorías:", err);
     }
   };
 
@@ -136,7 +143,82 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     }));
   };
 
-  const SEDE_LABELS = { 'PV001': 'Copacabana (Principal)', '00301': 'Girardota', '00701': 'Barbosa', '00201': 'Villahermosa' };
+  // --- Descargar plantilla CSV de ejemplo ---
+  const downloadSkuTemplate = () => {
+    const content = 'sku\n1734\n176149\n177422\n179394\n179643';
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla_skus.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // --- Importar SKUs desde archivo CSV ---
+  const handleSKUFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploadingSKUs(true);
+    try {
+      let skus = [];
+      const text = await file.text();
+      if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+        // Parse CSV: find SKU column or use first column
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length === 0) { alert('El archivo está vacío'); return; }
+        const sep = lines[0].includes(';') ? ';' : ',';
+        const headers = lines[0].split(sep).map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+        const skuColIdx = headers.findIndex(h => h === 'sku' || h === 'item' || h === 'codigo' || h === 'código' || h === 'item_code');
+        const colIdx = skuColIdx >= 0 ? skuColIdx : 0;
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
+          if (cols[colIdx]) skus.push(cols[colIdx]);
+        }
+      } else {
+        alert('Formato no soportado. Usa archivos .csv o .txt\nCada fila debe tener un SKU.');
+        return;
+      }
+
+      if (skus.length === 0) { alert('No se encontraron SKUs en el archivo'); return; }
+
+      // Search each SKU in the catalog
+      const apiBase = window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://backend-gestor-ecommerce.vercel.app';
+      let added = 0, notFound = [];
+      for (const sku of skus) {
+        try {
+          const res = await fetch(`${apiBase}/api/catalog?search=${encodeURIComponent(sku)}&pageSize=5&exactSearch=true&filter=active`);
+          const data = await res.json();
+          if (data.ok && data.data?.length > 0) {
+            const prod = data.data[0];
+            const id = prod.woo_product_id || prod.woo_id;
+            const name = prod.descripcion || prod.nombre || prod.name || prod.item;
+            const prodSku = prod.item || prod.sku || prod.item_code;
+            if (id && !form.applies_to_ids.includes(id)) {
+              setForm(f => ({
+                ...f,
+                applies_to_ids: [...f.applies_to_ids, id],
+                applies_to_names: [...f.applies_to_names, name + (prodSku ? ` (${prodSku})` : '')]
+              }));
+              added++;
+            }
+          } else {
+            notFound.push(sku);
+          }
+        } catch { notFound.push(sku); }
+      }
+
+      let msg = `✅ ${added} producto(s) agregados de ${skus.length} SKUs.`;
+      if (notFound.length > 0) msg += `\n\n⚠️ ${notFound.length} no encontrados:\n${notFound.slice(0, 20).join(', ')}${notFound.length > 20 ? '...' : ''}`;
+      alert(msg);
+    } catch (err) {
+      alert('Error procesando archivo: ' + err.message);
+    } finally {
+      setUploadingSKUs(false);
+    }
+  };
+
 
   const toggleSyncSede = (code) => {
     setSyncSedes(prev => prev.includes(code) ? prev.filter(s => s !== code) : [...prev, code]);
@@ -160,20 +242,23 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       const results = [];
       for (const code of syncSedes) {
         const url = SEDE_WP_URLS[code];
+        // Filtrar reglas que aplican a esta sede (sedes=null → todas, o que incluya el code)
+        const sedeRules = activeRules.filter(r => !r.sedes || r.sedes.includes(code));
         try {
-          const r = await syncDiscountRulesToWP(url, activeRules);
-          results.push({ code, ok: r.ok, synced: r.synced || 0 });
+          const r = await syncDiscountRulesToWP(url, sedeRules);
+          results.push({ code, ok: r.ok, synced: r.synced || 0, total: sedeRules.length });
         } catch {
-          results.push({ code, ok: false, synced: 0 });
+          results.push({ code, ok: false, synced: 0, total: sedeRules.length });
         }
       }
       const ok = results.filter(r => r.ok);
       const fail = results.filter(r => !r.ok);
-      const sedeNames = ok.map(r => SEDE_LABELS[r.code] || r.code).join(', ');
+      const detail = ok.map(r => `  ✅ ${SEDE_LABELS[r.code] || r.code}: ${r.total} regla(s)`).join('\n');
       if (fail.length === 0) {
-        alert(`✅ ${activeRules.length} reglas sincronizadas en ${ok.length} sede(s):\n${sedeNames}\n\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`);
+        alert(`Sincronización exitosa en ${ok.length} sede(s):\n\n${detail}\n\nEl plugin FlyCart ya las está aplicando.\n\n⚠️ Las reglas creadas directamente en FlyCart NO se modifican.`);
       } else {
-        alert(`⚠️ Sincronizado en ${ok.length} de ${syncSedes.length} sedes.\n${fail.length} fallaron: ${fail.map(f => SEDE_LABELS[f.code] || f.code).join(', ')}`);
+        const failDetail = fail.map(f => `  ❌ ${SEDE_LABELS[f.code] || f.code}`).join('\n');
+        alert(`⚠️ Sincronizado en ${ok.length} de ${syncSedes.length} sedes.\n\n${detail}\n\nFallaron:\n${failDetail}`);
       }
     } catch (err) {
       alert("Error sincronizando: " + err.message);
@@ -213,12 +298,15 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     setForm({ ...EMPTY_FORM });
     setEditingRule(null);
     setShowForm(false);
-    setCategorySearch("");
   };
 
   const openCreate = () => {
     resetForm();
-    setForm(f => ({ ...f, display_order: rules.length }));
+    setForm(f => ({
+      ...f,
+      display_order: rules.length,
+      sedes: esAdminGlobal ? null : (userSedeCode ? [userSedeCode] : null)
+    }));
     setShowForm(true);
   };
 
@@ -228,7 +316,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       title: rule.title || "",
       discount_type: rule.discount_type || "percentage",
       discount_value: rule.discount_value || 0,
-      applies_to: rule.applies_to || "categories",
+      applies_to: rule.applies_to || "products",
       applies_to_ids: rule.applies_to_ids || [],
       applies_to_names: rule.applies_to_names || [],
       schedule_type: rule.schedule_type || "days",
@@ -237,6 +325,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       date_end: rule.date_end || "",
       active: rule.active,
       display_order: rule.display_order || 0,
+      sedes: rule.sedes || null,
     });
     setShowForm(true);
   };
@@ -255,6 +344,10 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       if (payload.schedule_type === "date_range") { payload.schedule_days = []; }
       if (payload.schedule_type === "always") { payload.schedule_days = []; payload.date_start = null; payload.date_end = null; }
       if (payload.applies_to === "all") { payload.applies_to_ids = []; payload.applies_to_names = []; }
+      // Sedes: si están todas seleccionadas o ninguna, guardar null (=todas)
+      if (payload.sedes && payload.sedes.length === Object.keys(SEDE_WP_URLS).length) {
+        payload.sedes = null;
+      }
 
       const res = editingRule
         ? await updateDiscountRule(editingRule.id, payload)
@@ -294,29 +387,6 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     }));
   };
 
-  const addCategory = (cat) => {
-    if (form.applies_to_ids.includes(cat.id)) return;
-    setForm(f => ({
-      ...f,
-      applies_to_ids: [...f.applies_to_ids, cat.id],
-      applies_to_names: [...f.applies_to_names, cat.name]
-    }));
-    setCategorySearch("");
-  };
-
-  const removeCategory = (idx) => {
-    setForm(f => ({
-      ...f,
-      applies_to_ids: f.applies_to_ids.filter((_, i) => i !== idx),
-      applies_to_names: f.applies_to_names.filter((_, i) => i !== idx)
-    }));
-  };
-
-  const filteredCategories = categories.filter(c =>
-    c.name.toLowerCase().includes(categorySearch.toLowerCase()) &&
-    !form.applies_to_ids.includes(c.id)
-  );
-
   // Determinar si una regla está activa HOY
   const isActiveToday = (rule) => {
     if (!rule.active) return false;
@@ -333,6 +403,31 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
   const activeToday = rules.filter(isActiveToday);
   const activeCount = rules.filter(r => r.active).length;
 
+  // Filtrar reglas visibles según rol
+  const visibleRules = esAdminGlobal
+    ? rules
+    : rules.filter(r => !r.sedes || r.sedes.includes(userSedeCode));
+
+  // Helper: toggle form sede
+  const toggleFormSede = (code) => {
+    setForm(f => {
+      const current = f.sedes || [];
+      if (current.includes(code)) {
+        const next = current.filter(s => s !== code);
+        return { ...f, sedes: next.length === 0 ? null : next };
+      }
+      return { ...f, sedes: [...current, code] };
+    });
+  };
+
+  const formSedesAll = !form.sedes || form.sedes.length === 0;
+  const setFormSedesAll = () => setForm(f => ({ ...f, sedes: null }));
+
+  // Count rules per sede for sync modal
+  const getRulesForSede = (code) => {
+    return rules.filter(r => r.active && (!r.sedes || r.sedes.includes(code)));
+  };
+
   return (
     <div>
       {/* Header */}
@@ -342,7 +437,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
           <p>Configura descuentos automáticos por día, categoría o rango de fecha</p>
         </div>
         <div className="ge-header-actions">
-          {rules.length === 0 && (
+          {esAdminGlobal && rules.length === 0 && (
             <button className="ge-btn info" onClick={handleFetchWooRules} disabled={importing}>
               {importing ? "Consultando..." : "📥 Importar desde WooCommerce"}
             </button>
@@ -356,27 +451,55 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         </div>
       </div>
 
-      {/* Modal de sincronización - Seleccionar sedes */}
+      {/* ════════ Modal de sincronización con WP ════════ */}
       {showSyncModal && (
-        <div className="ge-card pad" style={{ marginBottom: 16, borderLeft: '4px solid var(--ge-accent)' }}>
-          <h3 style={{ margin: '0 0 8px', color: 'var(--ge-text-dark)' }}>🔄 Sincronizar con WordPress</h3>
-          <p className="ge-row-subtitle" style={{ marginBottom: 12 }}>
-            Selecciona las sedes donde quieres enviar las {rules.filter(r => r.active).length} reglas activas.
-            Las reglas con prefijo [MK-Gestor] anteriores serán reemplazadas.
-          </p>
-          <div className="ge-row-meta" style={{ marginBottom: 12, gap: 8 }}>
-            {Object.keys(SEDE_WP_URLS).map(code => (
-              <label key={code} className="ge-form-check" style={{ fontSize: 13 }}>
-                <input type="checkbox" checked={syncSedes.includes(code)} onChange={() => toggleSyncSede(code)} />
-                {SEDE_LABELS[code] || code}
-              </label>
-            ))}
-          </div>
-          <div className="ge-form-actions">
-            <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing || syncSedes.length === 0}>
-              {syncing ? "Sincronizando..." : `🔄 Sincronizar en ${syncSedes.length} sede(s)`}
-            </button>
-            <button className="ge-btn secondary" onClick={() => setShowSyncModal(false)}>Cancelar</button>
+        <div className="dm-modal-overlay" onClick={() => setShowSyncModal(false)}>
+          <div className="dm-sync-modal" onClick={e => e.stopPropagation()}>
+            <div className="dm-sync-modal-header">
+              <div className="dm-sync-modal-icon">🔄</div>
+              <div>
+                <h3>Sincronizar con WordPress</h3>
+                <p>Envía las reglas activas al plugin FlyCart en cada sede</p>
+              </div>
+              <button className="dm-modal-close" onClick={() => setShowSyncModal(false)}>×</button>
+            </div>
+
+            <div className="dm-sync-modal-body">
+              <div className="dm-sync-sedes-grid">
+                {Object.keys(SEDE_WP_URLS)
+                  .filter(code => esAdminGlobal || code === userSedeCode)
+                  .map(code => {
+                  const rulesCount = getRulesForSede(code).length;
+                  const isSelected = syncSedes.includes(code);
+                  return (
+                    <div
+                      key={code}
+                      className={`dm-sync-sede-card ${isSelected ? 'selected' : ''}`}
+                      onClick={() => toggleSyncSede(code)}
+                    >
+                      <div className="dm-sync-sede-check">
+                        {isSelected ? '✅' : '⬜'}
+                      </div>
+                      <div className="dm-sync-sede-icon">{SEDE_ICONS[code]}</div>
+                      <div className="dm-sync-sede-name">{SEDE_LABELS[code]}</div>
+                      <div className="dm-sync-sede-count">{rulesCount} regla{rulesCount !== 1 ? 's' : ''}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="dm-sync-summary">
+                <span>📋 Se sincronizarán las reglas activas que apliquen a cada sede seleccionada</span>
+                <span className="dm-sync-warning">⚠️ Las reglas con prefijo [MK-Gestor] anteriores serán reemplazadas</span>
+              </div>
+            </div>
+
+            <div className="dm-sync-modal-footer">
+              <button className="ge-btn secondary" onClick={() => setShowSyncModal(false)}>Cancelar</button>
+              <button className="ge-btn accent" onClick={handleSyncToWP} disabled={syncing || syncSedes.length === 0}>
+                {syncing ? "Sincronizando..." : `🔄 Sincronizar en ${syncSedes.length} sede(s)`}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -425,25 +548,25 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       {/* Stats rápidas */}
       <div className="ge-stats">
         <div className="ge-stat">
-          <div className="ge-stat-value primary">{rules.length}</div>
-          <div className="ge-stat-label">Total reglas</div>
+          <div className="ge-stat-value primary">{visibleRules.length}</div>
+          <div className="ge-stat-label">{esAdminGlobal ? 'Total reglas' : 'Reglas en tu sede'}</div>
         </div>
         <div className="ge-stat">
-          <div className="ge-stat-value success">{activeCount}</div>
+          <div className="ge-stat-value success">{visibleRules.filter(r => r.active).length}</div>
           <div className="ge-stat-label">Activas</div>
         </div>
         <div className="ge-stat">
-          <div className="ge-stat-value warning">{activeToday.length}</div>
+          <div className="ge-stat-value warning">{visibleRules.filter(isActiveToday).length}</div>
           <div className="ge-stat-label">Ejecutándose hoy</div>
         </div>
       </div>
 
       {/* Reglas activas hoy */}
-      {activeToday.length > 0 && (
+      {visibleRules.filter(isActiveToday).length > 0 && (
         <div className="ge-active-today">
           <div className="ge-active-today-title">🟢 Descuentos activos hoy:</div>
           <div className="ge-row-meta">
-            {activeToday.map(r => (
+            {visibleRules.filter(isActiveToday).map(r => (
               <span key={r.id} className="ge-pill active-accent">
                 {r.title} — {r.discount_value}{r.discount_type === 'percentage' ? '%' : '$'}
               </span>
@@ -452,137 +575,248 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         </div>
       )}
 
-      {/* Formulario crear/editar */}
+      {/* ════════ Modal crear/editar regla ════════ */}
       {showForm && (
-        <div className="ge-card pad" style={{ marginBottom: 24 }}>
-          <h3 className="ge-import-title" style={{ color: 'var(--ge-text-dark)' }}>
-            {editingRule ? "Editar Regla" : "Nueva Regla de Descuento"}
-          </h3>
-
-          <div className="ge-form">
-            <div className="ge-form-group">
-              <label>Título de la regla</label>
-              <input className="ge-input" placeholder="Ej: LUNES 15% EN POLLO" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+        <div className="dm-modal-overlay" onClick={resetForm}>
+          <div className="dm-rule-modal" onClick={e => e.stopPropagation()}>
+            {/* Modal header */}
+            <div className="dm-rule-modal-header">
+              <div className="dm-rule-modal-header-left">
+                <div className="dm-rule-modal-icon">{editingRule ? '✏️' : '➕'}</div>
+                <div>
+                  <h3>{editingRule ? 'Editar Regla' : 'Nueva Regla de Descuento'}</h3>
+                  <p className="dm-rule-modal-subtitle">{editingRule ? 'Modifica los parámetros de la regla' : 'Configura un nuevo descuento automático'}</p>
+                </div>
+              </div>
+              <button className="dm-modal-close" onClick={resetForm}>×</button>
             </div>
 
-            <div className="ge-form-row">
-              <div className="ge-form-group">
-                <label>Tipo de descuento</label>
-                <select className="ge-input" value={form.discount_type} onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}>
-                  <option value="percentage">Porcentaje (%)</option>
-                  <option value="fixed">Valor fijo ($)</option>
-                </select>
+            {/* Discount preview strip */}
+            <div className="dm-discount-preview-strip">
+              <div className="dm-discount-preview-value">
+                {form.discount_value > 0 ? (
+                  <>{form.discount_value}{form.discount_type === 'percentage' ? '%' : '$'} <span>de descuento</span></>
+                ) : (
+                  <span className="dm-discount-preview-empty">Configura el descuento</span>
+                )}
               </div>
-              <div className="ge-form-group">
-                <label>Valor {form.discount_type === 'percentage' ? '(%)' : '($)'}</label>
-                <input type="number" className="ge-input" placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 5000"} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))} min="0" max={form.discount_type === 'percentage' ? 100 : undefined} />
+              <div className="dm-discount-preview-status">
+                <span className={`dm-status-dot ${form.active ? 'active' : 'inactive'}`}></span>
+                {form.active ? 'Activa' : 'Inactiva'}
               </div>
             </div>
 
-            {/* Aplica a */}
-            <div className="ge-form-group">
-              <label>Aplica a</label>
-              <select className="ge-input" value={form.applies_to} onChange={e => setForm(f => ({ ...f, applies_to: e.target.value, applies_to_ids: [], applies_to_names: [] }))}>
-                <option value="all">Todos los productos</option>
-                <option value="categories">Categorías específicas</option>
-                <option value="products">Productos específicos (SKU)</option>
-              </select>
-
-              {form.applies_to === "categories" && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="ge-row-meta" style={{ marginBottom: 8 }}>
-                    {form.applies_to_names.map((name, idx) => (
-                      <span key={idx} className="ge-chip category">
-                        {name}
-                        <button className="ge-chip-remove" onClick={() => removeCategory(idx)}>×</button>
-                      </span>
-                    ))}
+            <div className="dm-rule-modal-body">
+              {/* ── Sección 1: Información General ── */}
+              <div className="dm-section">
+                <div className="dm-section-header">
+                  <span className="dm-section-number">1</span>
+                  <span className="dm-section-title">Información General</span>
+                </div>
+                <div className="dm-section-content">
+                  <div className="ge-form-group">
+                    <label>Título de la regla</label>
+                    <input className="ge-input" placeholder="Ej: LUNES 15% EN POLLO" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
                   </div>
-                  <input className="ge-input" placeholder="Buscar categoría..." value={categorySearch} onChange={e => setCategorySearch(e.target.value)} />
-                  {categorySearch && (
-                    <div className="ge-dropdown">
-                      {filteredCategories.length === 0 ? (
-                        <div className="ge-dropdown-empty">No se encontraron categorías</div>
-                      ) : (
-                        filteredCategories.slice(0, 10).map(cat => (
-                          <div key={cat.id} className="ge-dropdown-item" onClick={() => addCategory(cat)}>{cat.name}</div>
-                        ))
-                      )}
+                  <div className="ge-form-row">
+                    <div className="ge-form-group">
+                      <label>Tipo de descuento</label>
+                      <select className="ge-input" value={form.discount_type} onChange={e => setForm(f => ({ ...f, discount_type: e.target.value }))}>
+                        <option value="percentage">Porcentaje (%)</option>
+                        <option value="fixed">Valor fijo ($)</option>
+                      </select>
                     </div>
+                    <div className="ge-form-group">
+                      <label>Valor {form.discount_type === 'percentage' ? '(%)' : '($)'}</label>
+                      <input type="number" className="ge-input" placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 5000"} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))} min="0" max={form.discount_type === 'percentage' ? 100 : undefined} />
+                    </div>
+                  </div>
+                  <label className="dm-toggle-check">
+                    <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />
+                    <span className="dm-toggle-slider"></span>
+                    <span className="dm-toggle-label">Regla activa</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* ── Sección 2: Productos ── */}
+              <div className="dm-section">
+                <div className="dm-section-header">
+                  <span className="dm-section-number">2</span>
+                  <span className="dm-section-title">Productos</span>
+                </div>
+                <div className="dm-section-content">
+                  <div className="ge-form-group">
+                    <select className="ge-input" value={form.applies_to} onChange={e => setForm(f => ({ ...f, applies_to: e.target.value, applies_to_ids: [], applies_to_names: [] }))}>
+                      <option value="all">Todos los productos</option>
+                      <option value="products">Productos específicos (SKU)</option>
+                    </select>
+                  </div>
+
+                  {form.applies_to === "products" && (
+                    <>
+                      {form.applies_to_names.length > 0 && (
+                        <div className="dm-products-list">
+                          {form.applies_to_names.map((name, idx) => (
+                            <span key={idx} className="ge-chip product">
+                              {name}
+                              <button className="ge-chip-remove" onClick={() => removeProduct(idx)}>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="ge-form-group" style={{ marginTop: 8 }}>
+                        <input className="ge-input" placeholder="🔍 Buscar producto por nombre o SKU..." value={productSearch} onChange={e => handleProductSearch(e.target.value)} />
+                        {searchingProducts && <div className="ge-form-help">Buscando...</div>}
+                        {productResults.length > 0 && (
+                          <div className="ge-dropdown">
+                            {productResults.map(prod => (
+                              <div key={prod.id} className="ge-dropdown-item" onClick={() => addProduct(prod)}>
+                                <span className="ge-dropdown-item-main">{prod.name}</span>
+                                {prod.sku && <span className="ge-dropdown-item-sub">SKU: {prod.sku}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Zona de importación masiva */}
+                      <div className="dm-sku-import-zone">
+                        <div className="dm-sku-import-header">
+                          <span className="dm-sku-import-icon">📋</span>
+                          <div>
+                            <div className="dm-sku-import-title">Importación masiva de SKUs</div>
+                            <div className="dm-sku-import-sub">Sube un archivo CSV con los códigos de producto</div>
+                          </div>
+                        </div>
+                        <div className="dm-sku-import-body">
+                          <div className="dm-sku-template">
+                            <div className="dm-sku-template-label">📄 Formato del archivo:</div>
+                            <table className="dm-sku-template-table">
+                              <thead><tr><th>sku</th></tr></thead>
+                              <tbody>
+                                <tr><td>1734</td></tr>
+                                <tr><td>176149</td></tr>
+                                <tr><td>177422</td></tr>
+                                <tr className="dm-sku-template-fade"><td>...</td></tr>
+                              </tbody>
+                            </table>
+                            <div className="dm-sku-template-notes">
+                              <span>✅ Primera fila: encabezado <strong>sku</strong></span>
+                              <span>✅ Una columna, un SKU por fila</span>
+                              <span>✅ Formatos: .csv o .txt</span>
+                            </div>
+                            <button type="button" className="dm-sku-template-download" onClick={downloadSkuTemplate}>
+                              ⬇️ Descargar plantilla de ejemplo
+                            </button>
+                          </div>
+                          <div className="dm-sku-upload-action">
+                            <label className={`dm-sku-upload-btn ${uploadingSKUs ? 'loading' : ''}`}>
+                              <input type="file" accept=".csv,.txt" onChange={handleSKUFileUpload} disabled={uploadingSKUs} style={{ display: 'none' }} />
+                              {uploadingSKUs ? (
+                                <><span className="dm-sku-spinner"></span> Procesando SKUs...</>
+                              ) : (
+                                <>📁 Seleccionar archivo CSV</>
+                              )}
+                            </label>
+                            {form.applies_to_ids.length > 0 && (
+                              <div className="dm-sku-count-badge">
+                                {form.applies_to_ids.length} producto(s) seleccionados
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
-              )}
+              </div>
 
-              {form.applies_to === "products" && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="ge-row-meta" style={{ marginBottom: 8 }}>
-                    {form.applies_to_names.map((name, idx) => (
-                      <span key={idx} className="ge-chip product">
-                        {name}
-                        <button className="ge-chip-remove" onClick={() => removeProduct(idx)}>×</button>
-                      </span>
-                    ))}
+              {/* ── Sección 3: Programación ── */}
+              <div className="dm-section">
+                <div className="dm-section-header">
+                  <span className="dm-section-number">3</span>
+                  <span className="dm-section-title">Programación</span>
+                </div>
+                <div className="dm-section-content">
+                  <div className="ge-form-group">
+                    <select className="ge-input" value={form.schedule_type} onChange={e => setForm(f => ({ ...f, schedule_type: e.target.value }))}>
+                      <option value="days">Días de la semana</option>
+                      <option value="date_range">Rango de fechas</option>
+                      <option value="always">Siempre activo</option>
+                    </select>
                   </div>
-                  <input className="ge-input" placeholder="Buscar producto por nombre o SKU..." value={productSearch} onChange={e => handleProductSearch(e.target.value)} />
-                  {searchingProducts && <div className="ge-form-help">Buscando...</div>}
-                  {productResults.length > 0 && (
-                    <div className="ge-dropdown">
-                      {productResults.map(prod => (
-                        <div key={prod.id} className="ge-dropdown-item" onClick={() => addProduct(prod)}>
-                          <span className="ge-dropdown-item-main">{prod.name}</span>
-                          {prod.sku && <span className="ge-dropdown-item-sub">SKU: {prod.sku}</span>}
-                        </div>
+
+                  {form.schedule_type === "days" && (
+                    <div className="ge-row-meta" style={{ marginTop: 8 }}>
+                      {DAYS.map(day => (
+                        <button key={day.value} type="button" onClick={() => toggleDay(day.value)} className={`ge-day-btn ${form.schedule_days.includes(day.value) ? 'active' : ''}`}>
+                          {day.label}
+                        </button>
                       ))}
                     </div>
                   )}
+
+                  {form.schedule_type === "date_range" && (
+                    <div className="ge-form-row" style={{ marginTop: 8 }}>
+                      <div className="ge-form-group">
+                        <label className="ge-form-help">Fecha inicio</label>
+                        <input type="date" className="ge-input" value={form.date_start} onChange={e => setForm(f => ({ ...f, date_start: e.target.value }))} />
+                      </div>
+                      <div className="ge-form-group">
+                        <label className="ge-form-help">Fecha fin</label>
+                        <input type="date" className="ge-input" value={form.date_end} onChange={e => setForm(f => ({ ...f, date_end: e.target.value }))} />
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
 
-            {/* Programación */}
-            <div className="ge-form-group">
-              <label>Programación</label>
-              <select className="ge-input" value={form.schedule_type} onChange={e => setForm(f => ({ ...f, schedule_type: e.target.value }))}>
-                <option value="days">Días de la semana</option>
-                <option value="date_range">Rango de fechas</option>
-                <option value="always">Siempre activo</option>
-              </select>
-
-              {form.schedule_type === "days" && (
-                <div className="ge-row-meta" style={{ marginTop: 12 }}>
-                  {DAYS.map(day => (
-                    <button key={day.value} type="button" onClick={() => toggleDay(day.value)} className={`ge-day-btn ${form.schedule_days.includes(day.value) ? 'active' : ''}`}>
-                      {day.label}
-                    </button>
-                  ))}
+              {/* ── Sección 4: Sedes (solo admin global) ── */}
+              {esAdminGlobal && (
+              <div className="dm-section">
+                <div className="dm-section-header">
+                  <span className="dm-section-number">4</span>
+                  <span className="dm-section-title">Sedes</span>
                 </div>
-              )}
-
-              {form.schedule_type === "date_range" && (
-                <div className="ge-form-row" style={{ marginTop: 12 }}>
-                  <div className="ge-form-group">
-                    <label className="ge-form-help">Fecha inicio</label>
-                    <input type="date" className="ge-input" value={form.date_start} onChange={e => setForm(f => ({ ...f, date_start: e.target.value }))} />
+                <div className="dm-section-content">
+                  <p className="dm-section-hint">Selecciona en qué sedes aplica esta regla de descuento</p>
+                  <div className="dm-sede-selector">
+                    <div
+                      className={`dm-sede-pill all ${formSedesAll ? 'active' : ''}`}
+                      onClick={setFormSedesAll}
+                    >
+                      🌐 Todas las sedes
+                    </div>
+                    {Object.keys(SEDE_WP_URLS).map(code => (
+                      <div
+                        key={code}
+                        className={`dm-sede-pill ${!formSedesAll && form.sedes?.includes(code) ? 'active' : ''} ${formSedesAll ? 'dimmed' : ''}`}
+                        onClick={() => {
+                          if (formSedesAll) {
+                            // Switch from "all" to specific: select only this one
+                            setForm(f => ({ ...f, sedes: [code] }));
+                          } else {
+                            toggleFormSede(code);
+                          }
+                        }}
+                      >
+                        {SEDE_ICONS[code]} {SEDE_LABELS[code]}
+                      </div>
+                    ))}
                   </div>
-                  <div className="ge-form-group">
-                    <label className="ge-form-help">Fecha fin</label>
-                    <input type="date" className="ge-input" value={form.date_end} onChange={e => setForm(f => ({ ...f, date_end: e.target.value }))} />
-                  </div>
                 </div>
+              </div>
               )}
             </div>
 
-            <div className="ge-row-meta">
-              <label className="ge-form-check">
-                <input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} /> Activa
-              </label>
-            </div>
-
-            <div className="ge-form-actions">
-              <button className="ge-btn" onClick={handleSave} disabled={saving}>
-                {saving ? "Guardando..." : (editingRule ? "Actualizar Regla" : "Crear Regla")}
-              </button>
+            {/* Modal footer */}
+            <div className="dm-rule-modal-footer">
               <button className="ge-btn secondary" onClick={resetForm}>Cancelar</button>
+              <button className="ge-btn accent" onClick={handleSave} disabled={saving}>
+                {saving ? "Guardando..." : (editingRule ? "💾 Actualizar Regla" : "💾 Crear Regla")}
+              </button>
             </div>
           </div>
         </div>
@@ -591,11 +825,15 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       {/* Lista de reglas */}
       {loading ? (
         <div className="ge-card ge-empty">Cargando reglas...</div>
-      ) : rules.length === 0 ? (
-        <div className="ge-card ge-empty">No hay reglas de descuento. Crea la primera.</div>
+      ) : visibleRules.length === 0 ? (
+        <div className="ge-card ge-empty">
+          {esAdminGlobal
+            ? 'No hay reglas de descuento. Crea la primera.'
+            : `No hay reglas de descuento para ${sedeActual?.nombre || 'tu sede'}.`}
+        </div>
       ) : (
         <div className="ge-card">
-          {rules.map(rule => {
+          {visibleRules.map(rule => {
             const activeNow = isActiveToday(rule);
             return (
               <div key={rule.id} className={`ge-rule-row ${rule.active ? '' : 'dimmed'} ${activeNow ? 'running' : ''}`}>
@@ -622,7 +860,14 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                     {rule.schedule_type === "days" && <>📅 {(rule.schedule_days || []).map(d => DAY_LABELS[d]).join(', ')}</>}
                     {rule.schedule_type === "date_range" && <>📆 {rule.date_start} → {rule.date_end}</>}
                     {rule.schedule_type === "always" && <>🔄 Siempre activo</>}
-                    {' '}🌐 Todas las sedes
+                    {' · '}
+                    {!rule.sedes ? (
+                      <span className="dm-sede-badge all">🌐 Todas</span>
+                    ) : (
+                      rule.sedes.map(s => (
+                        <span key={s} className="dm-sede-badge">{SEDE_ICONS[s]} {(SEDE_LABELS[s] || s).split(' ')[0]}</span>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -650,8 +895,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
           El plugin se encarga de mostrar badges de descuento, precios tachados y toda la presentación visual en la tienda.
           Las reglas se activan/desactivan según el día de la semana o rango de fechas configurado.
           <br /><br />
-          <strong>⚠️ Nota:</strong> Los descuentos aplican a <strong>todas las sedes por igual</strong> porque el plugin FlyCart
-          no soporta descuentos por sede. Para diferenciar por sede, usa categorías o productos específicos de cada sede.
+          <strong>💡 Sedes:</strong> Cada regla puede asignarse a sedes específicas. Al sincronizar, solo se envían
+          las reglas que correspondan a cada sede.
         </div>
       </div>
     </div>
