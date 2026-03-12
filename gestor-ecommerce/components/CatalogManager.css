@@ -1,5 +1,79 @@
 /* --- CATALOG MANAGER STYLES (ENHANCED) --- */
 
+/* ══════════════════════════════════════════════ */
+/* TABLE ROW CLASSES (reemplazan inline styles)   */
+/* ══════════════════════════════════════════════ */
+
+.cm-product-img {
+    width: 50px; height: 50px;
+    object-fit: contain; border-radius: 4px; border: 1px solid #eee;
+}
+.cm-product-img-placeholder {
+    width: 50px; height: 50px;
+    background: #f3f4f6; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+}
+.cm-sku { font-weight: 600; color: #111827; }
+.cm-unlinked-badge { font-size: 0.75rem; color: #d97706; font-weight: 600; }
+.cm-desc { font-weight: 500; }
+.cm-cat-info { font-size: 0.85rem; color: #4f46e5; }
+.cm-cat-info-siesa { font-size: 0.85rem; color: #6b7280; }
+.cm-tag-info { display: block; color: #9ca3af; font-size: 0.75rem; }
+.cm-text-muted { font-size: 0.75rem; color: #9ca3af; }
+
+/* Sede Badges */
+.cm-sede-badges {
+    display: flex; gap: 3px; justify-content: center; flex-wrap: wrap;
+}
+.cm-sede-badge {
+    display: inline-block; padding: 2px 5px; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 600;
+}
+.cm-sede-badge.on {
+    background: #dcfce7; color: #166534; border: 1px solid #bbf7d0;
+}
+.cm-sede-badge.off {
+    background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb;
+}
+
+/* Toggle Switch (CSS puro — reemplaza inline styles del label) */
+.cm-toggle { position: relative; display: inline-block; width: 44px; height: 24px; vertical-align: middle; }
+.cm-toggle.disabled { opacity: 0.5; }
+.cm-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.cm-toggle-track {
+    position: absolute; cursor: pointer; inset: 0;
+    background-color: #ccc; transition: .3s; border-radius: 34px;
+}
+.cm-toggle-track.on { background-color: #2563eb; }
+.cm-toggle.disabled .cm-toggle-track { cursor: not-allowed; }
+.cm-toggle-thumb {
+    position: absolute; height: 18px; width: 18px;
+    left: 4px; bottom: 3px;
+    background-color: white; transition: .3s; border-radius: 50%;
+}
+.cm-toggle-track.on .cm-toggle-thumb { left: 22px; }
+
+/* Actions cell */
+.cm-actions-cell { white-space: nowrap; }
+.cm-edit-btn { margin-left: 10px; padding: 4px 8px !important; }
+
+/* Search input width */
+.cm-search-input { width: 250px; }
+
+/* Stats grid spacing */
+.cm-stats { margin-bottom: 24px; }
+.cm-stats .filter-card { cursor: pointer; }
+.cm-stat-active { color: var(--ge-success); }
+.cm-stat-warning { color: var(--ge-warning); }
+
+/* Pagination */
+.cm-pagination {
+    margin-top: 20px; display: flex;
+    justify-content: space-between; align-items: center;
+}
+
+/* ══════════════════════════════════════════════ */
+
 /* Modal Backdrop */
 .cm-modal-overlay {
     position: fixed;

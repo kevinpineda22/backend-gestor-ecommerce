@@ -64,8 +64,7 @@ export async function fetchCatalog({ page = 1, pageSize = 20, search = "", filte
   const params = new URLSearchParams({
     page: page.toString(),
     pageSize: pageSize.toString(),
-    filter,
-    t: Date.now().toString()
+    filter
   });
   if (search.trim()) params.append("search", search.trim());
   if (exactSearch) params.append("exactSearch", "true");
