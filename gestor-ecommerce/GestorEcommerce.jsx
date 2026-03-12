@@ -35,7 +35,9 @@ const GestorEcommerce = () => {
           const miSede = res.sedes.find(s => s.id === userSedeId);
           setSedeActual(miSede || res.sedes[0]);
         } else {
-          setSedeActual(res.sedes[0]);
+          // Admin global → default a Copacabana Plaza (PV001)
+          const copacabana = res.sedes.find(s => s.codigo_siesa === 'PV001');
+          setSedeActual(copacabana || res.sedes[0]);
         }
       }
     } catch (err) {

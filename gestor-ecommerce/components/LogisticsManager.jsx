@@ -80,9 +80,7 @@ export default function LogisticsManager({ sedes = [], sedeActual = null, esAdmi
     setLoading(true);
     setLoadError(null);
     try {
-      console.log("📥 Cargando config logística, sede:", sede.code);
       const data = await fetchLogisticsConfig(sede.code);
-      console.log("📥 Respuesta:", data.ok, data.data ? "tiene data" : "sin data");
       if (data.ok && data.data) {
         // Merge with defaults to fill any missing fields
         const merged = { ...DEFAULT_CONFIG, ...data.data };
@@ -163,9 +161,7 @@ export default function LogisticsManager({ sedes = [], sedeActual = null, esAdmi
     setSaving(true);
     try {
       // 1. Save to Supabase (our source of truth for reading)
-      console.log("💾 Guardando en Supabase, sede:", selectedSede.code);
       const supabaseRes = await saveLogisticsConfig(selectedSede.code, config);
-      console.log("💾 Respuesta Supabase:", JSON.stringify(supabaseRes));
       if (!supabaseRes.ok) {
         alert("Error guardando en base de datos: " + (supabaseRes.message || "Error desconocido"));
         setSaving(false);

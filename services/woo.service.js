@@ -176,26 +176,29 @@ export async function getWooProducts({ page = 1, perPage = 50 } = {}) {
  * Obtiene precios de múltiples productos Woo en una sola petición (BATCH)
  * Mucho más eficiente que llamar uno por uno.
  */
-export async function getWooPricesByIds(ids) {
+export async function getWooPricesByIds(ids, sedeCode) {
   // Eliminar duplicados y nulos/undefined
   const validIds = [...new Set(ids.filter((id) => id))];
 
   if (validIds.length === 0) return {};
 
+  // Para PV001 o sin sede, usar IDs directos
+  // Para otras sedes, los IDs de PV001 no aplican — se usa getWooPricesBySkus
+  if (sedeCode && sedeCode !== "PV001") {
+    return {}; // Las sedes no-PV001 usan getWooPricesBySkus
+  }
+
   try {
-    // Nota: 'include' acepta IDs separados por coma.
-    // Woo paginación default es 10, api max es 100.
     const response = await wooApi.get("/products", {
       params: {
         include: validIds.join(","),
         per_page: 100,
-        _fields: "id,price,regular_price,stock_quantity,manage_stock", // Precio y Stock
+        _fields: "id,sku,price,regular_price,stock_quantity,manage_stock",
       },
     });
 
     const dataMap = {};
     response.data.forEach((p) => {
-      // Prioridad: price (actual) > regular_price > 0
       const price = Number(p.price) || Number(p.regular_price) || 0;
       dataMap[p.id] = {
         price,
@@ -208,6 +211,50 @@ export async function getWooPricesByIds(ids) {
     console.error("⚠️ Error batch Woo prices:", error.message);
     return {};
   }
+}
+
+/**
+ * Obtener precios/stock de WooCommerce de una sede por SKUs.
+ * Retorna Map<sku, { price, stock, woo_product_id }>.
+ */
+export async function getWooPricesBySkus(skus, sedeCode) {
+  if (!skus || skus.length === 0) return {};
+
+  const client = await getWooClientForSede(sedeCode);
+  if (!client) return {};
+
+  const dataMap = {};
+  // WC API no soporta buscar por múltiples SKUs en batch,
+  // pero sí podemos traer todos los productos y filtrar.
+  // Para eficiencia, hacemos batches de SKUs individuales en paralelo.
+  const BATCH = 10;
+  for (let i = 0; i < skus.length; i += BATCH) {
+    const batch = skus.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map(async (sku) => {
+        try {
+          const res = await client.get("/products", {
+            params: { sku, per_page: 1, _fields: "id,sku,price,regular_price,stock_quantity,manage_stock" }
+          });
+          if (res.data.length > 0) {
+            const p = res.data[0];
+            return {
+              sku,
+              woo_product_id: p.id,
+              price: Number(p.price) || Number(p.regular_price) || 0,
+              stock: p.manage_stock ? (p.stock_quantity || 0) : null
+            };
+          }
+          return { sku, woo_product_id: null, price: null, stock: null };
+        } catch {
+          return { sku, woo_product_id: null, price: null, stock: null };
+        }
+      })
+    );
+    results.forEach(r => { dataMap[r.sku] = r; });
+  }
+
+  return dataMap;
 }
 
 

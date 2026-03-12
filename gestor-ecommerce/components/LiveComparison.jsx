@@ -85,7 +85,8 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
     try {
       const res = await updateWooProduct(row.woo_product_id, {
         price: row.siesa_price,
-        stock_quantity: row.stock_disponible // Regresamos al mapeo live
+        stock_quantity: row.stock_disponible,
+        sede // Enviar sede para que solo sincronice en esta sede
       });
 
       if (res.ok) {

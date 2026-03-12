@@ -1,4 +1,4 @@
-import { getWooProducts, getWooPricesByIds, getWooClientForSede, getAllSedeWooClients } from "./woo.service.js";
+import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients } from "./woo.service.js";
 import supabase from "../supabaseClient.js";
 import wooApi from "./woo.service.js";
 import { getLivePriceForItem } from "./siesa/siesa.prices.js";
@@ -450,7 +450,11 @@ export async function updateProductInWoo(wooId, data) {
       payload.meta_data = [...(payload.meta_data || []), ...pumMeta];
   }
 
-  // 1. Update Woo en TODAS las sedes
+  // Determinar si es sync de precio/stock (solo 1 sede) o edición de datos (todas las sedes)
+  const isPriceStockOnly = (data.price !== undefined || data.stock_quantity !== undefined)
+    && !data.name && !data.images && !data.image_url && !data.categories && !data.tags && !data.brands
+    && data.pum_qty === undefined && data.pum_unit === undefined;
+
   let wooResponse;
   const sedeResults = [];
 
@@ -462,37 +466,52 @@ export async function updateProductInWoo(wooId, data) {
     .maybeSingle();
   const sku = prodRow?.item;
 
-  // Obtener clientes de todas las sedes
-  const allClients = await getAllSedeWooClients();
+  if (isPriceStockOnly && data.sede) {
+    // ══ Sync precio/stock → SOLO la sede indicada ══
+    const client = await getWooClientForSede(data.sede);
+    if (!client) throw new Error(`No se pudo obtener cliente WC para sede ${data.sede}`);
 
-  for (const [sedeCode, client] of allClients) {
-    try {
-      let productId = null;
+    let productId = data.sede === "PV001" ? wooId : null;
+    if (!productId && sku) {
+      const searchRes = await client.get("/products", { params: { sku } });
+      if (searchRes.data.length > 0) productId = searchRes.data[0].id;
+    }
+    if (!productId) throw new Error(`Producto SKU ${sku} no encontrado en sede ${data.sede}`);
 
-      if (sedeCode === "PV001") {
-        // PV001 usa el wooId directo
-        productId = wooId;
-      } else if (sku) {
-        // Otras sedes: buscar producto por SKU
-        const searchRes = await client.get("/products", { params: { sku } });
-        if (searchRes.data.length > 0) productId = searchRes.data[0].id;
-      }
+    const response = await client.put(`/products/${productId}`, payload);
+    wooResponse = response.data;
+    sedeResults.push({ sede: data.sede, ok: true });
+    console.log(`✅ Precio/stock sincronizado en sede ${data.sede} (id=${productId})`);
+  } else {
+    // ══ Edición de datos del producto → TODAS las sedes ══
+    const allClients = await getAllSedeWooClients();
 
-      if (productId) {
-        const response = await client.put(`/products/${productId}`, payload);
-        if (sedeCode === "PV001") wooResponse = response.data;
-        sedeResults.push({ sede: sedeCode, ok: true });
-        console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
-      } else {
-        sedeResults.push({ sede: sedeCode, ok: false, reason: "SKU no encontrado" });
-      }
-    } catch (error) {
-      const msg = error.response?.data?.message || error.message;
-      console.error(`❌ Error actualizando en sede ${sedeCode}:`, msg);
-      sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
-      // Si PV001 falla, lanzar error (es la sede principal)
-      if (sedeCode === "PV001") {
-        throw new Error(`WooCommerce rechazó la actualización: ${msg}`);
+    for (const [sedeCode, client] of allClients) {
+      try {
+        let productId = null;
+
+        if (sedeCode === "PV001") {
+          productId = wooId;
+        } else if (sku) {
+          const searchRes = await client.get("/products", { params: { sku } });
+          if (searchRes.data.length > 0) productId = searchRes.data[0].id;
+        }
+
+        if (productId) {
+          const response = await client.put(`/products/${productId}`, payload);
+          if (sedeCode === "PV001") wooResponse = response.data;
+          sedeResults.push({ sede: sedeCode, ok: true });
+          console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
+        } else {
+          sedeResults.push({ sede: sedeCode, ok: false, reason: "SKU no encontrado" });
+        }
+      } catch (error) {
+        const msg = error.response?.data?.message || error.message;
+        console.error(`❌ Error actualizando en sede ${sedeCode}:`, msg);
+        sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
+        if (sedeCode === "PV001") {
+          throw new Error(`WooCommerce rechazó la actualización: ${msg}`);
+        }
       }
     }
   }
@@ -1018,9 +1037,18 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
     return { ok: true, data: [] };
   }
 
-  // 1️⃣ Optimización: Traer precios Woo en Batch
-  const wooIds = products.map((p) => p.woo_product_id); // Re-declaramos por seguridad
-  const wooDataMap = await getWooPricesByIds(wooIds);
+  // 1️⃣ Optimización: Traer precios Woo en Batch (de la sede seleccionada)
+  const wooIds = products.map((p) => p.woo_product_id);
+  const skus = products.map((p) => p.item);
+  
+  // Para PV001 usamos IDs directos, para otras sedes buscamos por SKU
+  let wooDataMap = {};
+  let skuWooMap = {};
+  if (sede === "PV001" || !sede) {
+    wooDataMap = await getWooPricesByIds(wooIds);
+  } else {
+    skuWooMap = await getWooPricesBySkus(skus, sede);
+  }
 
   // 2️⃣ Optimización: Procesamiento en paralelo con caché Siesa
   // El caché individual de precio/stock (3 min TTL) hace que items ya consultados
@@ -1052,7 +1080,16 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
             ? livePrice.precio
             : null;
 
-        const wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null };
+        // Para PV001: buscar por woo_product_id. Para otras sedes: buscar por SKU
+        let wooInfo;
+        let sedeWooProductId = p.woo_product_id;
+        if (sede === "PV001" || !sede) {
+          wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null };
+        } else {
+          const skuInfo = skuWooMap[p.item] || { price: null, stock: null, woo_product_id: null };
+          wooInfo = skuInfo;
+          if (skuInfo.woo_product_id) sedeWooProductId = skuInfo.woo_product_id;
+        }
         const wooPrice = wooInfo.price;
         const wooStock = wooInfo.stock;
 
