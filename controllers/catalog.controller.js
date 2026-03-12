@@ -46,8 +46,9 @@ export async function listCatalog(req, res) {
   const search = req.query.search || "";
   const filter = req.query.filter || "all";
   const exactSearch = req.query.exactSearch === "true";
+  const sedeCode = req.query.sede || "";
 
-  const result = await catalogService.getCatalogPaginated({ page, pageSize, search, filter, exactSearch });
+  const result = await catalogService.getCatalogPaginated({ page, pageSize, search, filter, exactSearch, sedeCode });
 
   if (!result.ok) {
     return res.status(500).json(result);
@@ -60,7 +61,7 @@ export async function listCatalog(req, res) {
  * Activar / desactivar producto en ecommerce
  */
 export async function toggleItem(req, res) {
-  const { item, active } = req.body;
+  const { item, active, sede } = req.body;
 
   if (!item || typeof active !== "boolean") {
     return res.status(400).json({
@@ -69,7 +70,7 @@ export async function toggleItem(req, res) {
     });
   }
 
-  const result = await catalogService.toggleCatalogItem({ item, active });
+  const result = await catalogService.toggleCatalogItem({ item, active, sedeCode: sede || "PV001" });
 
   if (!result.ok) {
     return res.status(500).json(result);

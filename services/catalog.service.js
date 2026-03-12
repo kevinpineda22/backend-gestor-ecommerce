@@ -1,4 +1,4 @@
-import { getWooProducts, getWooPricesByIds } from "./woo.service.js";
+import { getWooProducts, getWooPricesByIds, getWooClientForSede, getAllSedeWooClients } from "./woo.service.js";
 import supabase from "../supabaseClient.js";
 import wooApi from "./woo.service.js";
 import { getLivePriceForItem } from "./siesa/siesa.prices.js";
@@ -245,7 +245,7 @@ async function getFullCatalog() {
     // PARALELO: Descargar ambas tablas al mismo tiempo
     const [siesaItems, ecommerceMap] = await Promise.all([
       fetchAllRows("items_siesa", "f120_id, f120_descripcion, grupo, subgrupo, marca, activo"),
-      fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, image_url, woo_name, woo_category_names, woo_tag_names")
+      fetchAllRows("ecommerce_products", "item, woo_product_id, woo_status, ecommerce_active, active_sedes, image_url, woo_name, woo_category_names, woo_tag_names")
     ]);
     console.log(`✅ SIESA: ${siesaItems.length} | Ecommerce: ${ecommerceMap.length} (${Date.now() - start}ms)`);
 
@@ -289,6 +289,7 @@ async function getFullCatalog() {
         woo_product_id: ecommerce?.woo_product_id || null,
         woo_status: ecommerce?.woo_status || null,
         ecommerce_active: ecommerce?.ecommerce_active || false,
+        active_sedes: ecommerce?.active_sedes || {},
         image_url: ecommerce?.image_url || null,
         // Campos Cache Directos para visualización instantánea
         woo_category_names: ecommerce?.woo_category_names || null,
@@ -323,11 +324,11 @@ export async function getCatalog() {
  * Catálogo paginado con filtros server-side.
  * Retorna solo la página solicitada + conteos para las tarjetas de stats.
  */
-export async function getCatalogPaginated({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false } = {}) {
+export async function getCatalogPaginated({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false, sedeCode = "" } = {}) {
   try {
     const catalog = await getFullCatalog();
 
-    // Conteos globales (para las tarjetas de stats)
+    // Conteos (por sede si se especifica, global si no)
     const counts = {
       total: catalog.length,
       active: 0,
@@ -335,7 +336,11 @@ export async function getCatalogPaginated({ page = 1, pageSize = 20, search = ""
       no_image: 0
     };
     for (const item of catalog) {
-      if (item.ecommerce_active) counts.active++;
+      // Activo: si hay sedeCode, revisar active_sedes[sedeCode]; sino, el flag global
+      const isActive = sedeCode 
+        ? item.active_sedes?.[sedeCode] === true
+        : item.ecommerce_active;
+      if (isActive) counts.active++;
       if (!item.exists_in_woo) counts.unlinked++;
       if (!item.image_url) counts.no_image++;
     }
@@ -361,7 +366,9 @@ export async function getCatalogPaginated({ page = 1, pageSize = 20, search = ""
     }
 
     // Filtro por tipo
-    if (filter === "active") filtered = filtered.filter(r => r.ecommerce_active);
+    if (filter === "active") {
+      filtered = filtered.filter(r => sedeCode ? r.active_sedes?.[sedeCode] === true : r.ecommerce_active);
+    }
     else if (filter === "unlinked") filtered = filtered.filter(r => !r.exists_in_woo);
     else if (filter === "no_image") filtered = filtered.filter(r => !r.image_url);
 
@@ -443,18 +450,54 @@ export async function updateProductInWoo(wooId, data) {
       payload.meta_data = [...(payload.meta_data || []), ...pumMeta];
   }
 
-  // 1. Update Woo
+  // 1. Update Woo en TODAS las sedes
   let wooResponse;
-  try {
-    const response = await wooApi.put(`/products/${wooId}`, payload);
-    wooResponse = response.data;
-  } catch (error) {
-    if (error.response && error.response.data) {
-      console.error("WooCommerce API Error:", JSON.stringify(error.response.data, null, 2));
-      throw new Error(`WooCommerce rechazó la actualización: ${error.response.data.message || error.message}`);
+  const sedeResults = [];
+
+  // Obtener SKU del producto para buscarlo en otras sedes
+  const { data: prodRow } = await supabase
+    .from("ecommerce_products")
+    .select("item")
+    .eq("woo_product_id", wooId)
+    .maybeSingle();
+  const sku = prodRow?.item;
+
+  // Obtener clientes de todas las sedes
+  const allClients = await getAllSedeWooClients();
+
+  for (const [sedeCode, client] of allClients) {
+    try {
+      let productId = null;
+
+      if (sedeCode === "PV001") {
+        // PV001 usa el wooId directo
+        productId = wooId;
+      } else if (sku) {
+        // Otras sedes: buscar producto por SKU
+        const searchRes = await client.get("/products", { params: { sku } });
+        if (searchRes.data.length > 0) productId = searchRes.data[0].id;
+      }
+
+      if (productId) {
+        const response = await client.put(`/products/${productId}`, payload);
+        if (sedeCode === "PV001") wooResponse = response.data;
+        sedeResults.push({ sede: sedeCode, ok: true });
+        console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
+      } else {
+        sedeResults.push({ sede: sedeCode, ok: false, reason: "SKU no encontrado" });
+      }
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      console.error(`❌ Error actualizando en sede ${sedeCode}:`, msg);
+      sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
+      // Si PV001 falla, lanzar error (es la sede principal)
+      if (sedeCode === "PV001") {
+        throw new Error(`WooCommerce rechazó la actualización: ${msg}`);
+      }
     }
-    throw error;
   }
+
+  console.log("📊 Resultado sync multi-sede:", sedeResults);
 
   // 2. Update Local Mirror
   const updateLocal = {};
@@ -599,24 +642,29 @@ export async function createProductInWoo(data) {
           tagNames = response.data.tags.map(t => t.name).join(", ");
       }
 
+      const creatingSede = data.sede || "PV001";
+
       if (existing) {
           // Actualizar registro existente
+          const updatedSedes = { ...(existing.active_sedes || {}), [creatingSede]: true };
           await supabase.from("ecommerce_products").update({
               woo_product_id: newWooId,
               woo_status: 'publish',
               ecommerce_active: true,
+              active_sedes: updatedSedes,
               last_sync: new Date(),
               image_url: data.image_url || existing.image_url,
               woo_category_names: catNames,
               woo_tag_names: tagNames
           }).eq("item", data.sku);
       } else {
-          // Crear registro nuevo (Raro si venía del listado del gestor, pero posible)
+          // Crear registro nuevo
           await supabase.from("ecommerce_products").insert({
               item: data.sku,
               woo_product_id: newWooId,
               woo_status: 'publish',
               ecommerce_active: true,
+              active_sedes: { [creatingSede]: true },
               last_sync: new Date(),
               image_url: data.image_url,
               woo_category_names: catNames,
@@ -636,7 +684,7 @@ export async function createProductInWoo(data) {
   }
 }
 
-export async function toggleCatalogItem({ item, active }) {
+export async function toggleCatalogItem({ item, active, sedeCode = "PV001" }) {
   const sku = String(item);
 
   // 1. Buscar en ecommerce_products
@@ -647,114 +695,76 @@ export async function toggleCatalogItem({ item, active }) {
     .maybeSingle();
 
   if (ecommerceError) {
-    return {
-      ok: false,
-      message: "Error leyendo ecommerce_products",
-      error: ecommerceError,
-    };
+    return { ok: false, message: "Error leyendo ecommerce_products", error: ecommerceError };
   }
 
-  let wooProductId = ecommerce?.woo_product_id;
+  // Obtener cliente WooCommerce de la sede destino (null si no hay credenciales)
+  const sedeWooClient = await getWooClientForSede(sedeCode);
+  let wooSyncOk = false;
+  let sedeProductId = ecommerce?.woo_product_id || null;
 
-  // 2. Si NO tenemos woo_product_id, buscar en Woo por SKU
-  if (!wooProductId) {
-    const wooSearch = await wooApi.get("/products", {
-      params: { sku },
-    });
-
-    if (wooSearch.data.length > 0) {
-      // 🔁 Producto ya existe en Woo
-      wooProductId = wooSearch.data[0].id;
-
-      await supabase.from("ecommerce_products").upsert({
-        item: sku,
-        woo_product_id: wooProductId,
-        woo_status: active ? "publish" : "draft",
-        ecommerce_active: active,
-        last_sync: new Date(),
-      });
-
-      // Cambiar estado en Woo
-      await wooApi.put(`/products/${wooProductId}`, {
-        status: active ? "publish" : "draft",
-      });
-
-      return {
-        ok: true,
-        created: false,
-        woo_product_id: wooProductId,
-        active,
-      };
+  if (sedeWooClient) {
+    // Buscar producto en la sede por SKU
+    try {
+      const searchRes = await sedeWooClient.get("/products", { params: { sku } });
+      if (searchRes.data.length > 0) {
+        sedeProductId = searchRes.data[0].id;
+      }
+    } catch (err) {
+      console.error(`Error buscando SKU ${sku} en sede ${sedeCode}:`, err.message);
     }
+
+    // Cambiar estado en el WooCommerce de la sede
+    if (sedeProductId) {
+      try {
+        await sedeWooClient.put(`/products/${sedeProductId}`, {
+          status: active ? "publish" : "draft",
+        });
+        console.log(`✅ Producto ${sku} → ${active ? 'publish' : 'draft'} en sede ${sedeCode} (woo_id=${sedeProductId})`);
+        wooSyncOk = true;
+      } catch (err) {
+        console.error(`Error al toglear producto en sede ${sedeCode}:`, err.message);
+      }
+    }
+  } else {
+    console.warn(`⚠️ Sede ${sedeCode} sin credenciales WC. Solo se actualiza Supabase.`);
   }
 
-  // 3. Si NO existe ni en ecommerce_products ni en Woo → crear
-  if (!wooProductId) {
-    // Obtener datos desde SIESA
-    const { data: siesaItem, error: siesaError } = await supabase
-      .from("items_siesa")
-      .select("f120_descripcion")
-      .eq("f120_id", sku)
-      .single();
+  // Actualizar Supabase (active_sedes + estado global) SIEMPRE
+  const currentActiveSedes = { ...(ecommerce?.active_sedes || {}), [sedeCode]: active };
+  const anySedeActive = Object.values(currentActiveSedes).some(v => v === true);
 
-    if (siesaError || !siesaItem) {
-      return {
-        ok: false,
-        message: "Item no encontrado en SIESA",
-        error: siesaError,
-      };
-    }
-
-    // Crear producto en Woo
-    const wooResponse = await wooApi.post("/products", {
-      name: siesaItem.f120_descripcion,
-      sku,
-      status: active ? "publish" : "draft",
-      manage_stock: true,
-      stock_quantity: 0,
-    });
-
-    wooProductId = wooResponse.data.id;
-
-    // Guardar mapeo
-    await supabase.from("ecommerce_products").insert({
+  // Si no existía el registro en ecommerce_products, crearlo
+  if (!ecommerce) {
+    await supabase.from("ecommerce_products").upsert({
       item: sku,
-      woo_product_id: wooProductId,
-      woo_status: active ? "publish" : "draft",
-      ecommerce_active: active,
+      woo_product_id: sedeProductId, // ID del woo principal si es PV001
+      woo_status: anySedeActive ? "publish" : "draft",
+      ecommerce_active: anySedeActive,
+      active_sedes: currentActiveSedes,
       last_sync: new Date(),
     });
-
-    return {
-      ok: true,
-      created: true,
-      woo_product_id: wooProductId,
-      active,
-    };
+  } else {
+    await supabase.from("ecommerce_products")
+      .update({
+        woo_status: anySedeActive ? "publish" : "draft",
+        ecommerce_active: anySedeActive,
+        active_sedes: currentActiveSedes,
+        last_sync: new Date(),
+      })
+      .eq("item", sku);
   }
 
-  // 4. Caso final: ya existía mapeado → solo cambiar estado
-  await wooApi.put(`/products/${wooProductId}`, {
-    status: active ? "publish" : "draft",
-  });
-
-  await supabase
-    .from("ecommerce_products")
-    .update({
-      woo_status: active ? "publish" : "draft",
-      ecommerce_active: active,
-      last_sync: new Date(),
-    })
-    .eq("item", sku);
-
-  // Invalidar caché
   invalidateCatalogCache();
 
   return {
     ok: true,
     created: false,
-    woo_product_id: wooProductId,
+    woo_product_id: sedeProductId,
     active,
+    active_sedes: currentActiveSedes,
+    wooSyncOk,
+    message: wooSyncOk ? undefined : `Estado guardado en base de datos. Para reflejar en WooCommerce, configura las credenciales de la sede ${sedeCode} en Supabase → wc_sedes.`
   };
 }
 
@@ -895,6 +905,7 @@ export async function adoptWooProducts() {
             woo_product_id: null,
             woo_status: null,
             ecommerce_active: false,
+            active_sedes: {},
             woo_name: null,
             woo_category_names: null,
             woo_tag_names: null,
@@ -916,6 +927,33 @@ export async function adoptWooProducts() {
 
   console.log("🏁 Sincronización finalizada");
   console.log(`🎉 Total productos procesados: ${totalProcessed}`);
+
+  // Inicializar active_sedes para productos que no lo tienen
+  // Obtener todos los codigos de sede activos
+  const { data: allSedes } = await supabase.from("wc_sedes").select("codigo_siesa").eq("activa", true);
+  const allSedesObj = {};
+  (allSedes || []).forEach(s => { allSedesObj[s.codigo_siesa] = true; });
+  
+  console.log("🏷️ Inicializando active_sedes para productos sin configuración por sede...");
+  
+  // Buscar productos activos sin active_sedes y actualizarlos en lote
+  const { data: needsMigration } = await supabase
+    .from("ecommerce_products")
+    .select("item")
+    .eq("ecommerce_active", true)
+    .or("active_sedes.is.null,active_sedes.eq.{}");
+  
+  if (needsMigration && needsMigration.length > 0) {
+    const migrateBatch = 200;
+    for (let i = 0; i < needsMigration.length; i += migrateBatch) {
+      const batch = needsMigration.slice(i, i + migrateBatch);
+      const items = batch.map(r => r.item);
+      await supabase.from("ecommerce_products")
+        .update({ active_sedes: allSedesObj })
+        .in("item", items);
+    }
+    console.log(`✅ Migrados ${needsMigration.length} productos a active_sedes (${Object.keys(allSedesObj).join(', ')})`);
+  }
 
   // Invalidar caché para que la próxima carga refleje los cambios
   invalidateCatalogCache();

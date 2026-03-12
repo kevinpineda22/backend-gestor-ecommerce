@@ -1,4 +1,5 @@
 import axios from "axios";
+import supabase from "../supabaseClient.js";
 
 // --- Sanitización de variables de entorno ---
 const WC_URL = process.env.WC_URL?.trim().replace(/\/$/, ""); // Quitar slash final si existe
@@ -16,7 +17,7 @@ if (!WC_CONSUMER_KEY || !WC_CONSUMER_SECRET) {
 
 
 
-// --- Cliente Axios para WooCommerce ---
+// --- Cliente Axios para WooCommerce (PRINCIPAL / PV001) ---
 const wooApi = axios.create({
   baseURL: `${WC_URL}/wp-json/wc/v3`,
   auth: {
@@ -29,6 +30,92 @@ const wooApi = axios.create({
   },
   timeout: 15000,
 });
+
+// ═══════════════════════════════════════════════════════════════
+// CLIENTE WOOCOMMERCE POR SEDE
+// ═══════════════════════════════════════════════════════════════
+const _sedeClientsCache = new Map();
+let _sedeCredsCache = null;
+let _sedeCredsCacheTime = 0;
+const SEDE_CREDS_TTL = 10 * 60 * 1000; // 10 min
+
+async function getSedeCredentials() {
+  if (_sedeCredsCache && (Date.now() - _sedeCredsCacheTime) < SEDE_CREDS_TTL) {
+    return _sedeCredsCache;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("wc_sedes")
+      .select("codigo_siesa, wc_url, wc_consumer_key, wc_consumer_secret")
+      .eq("activa", true);
+    if (error) throw error;
+    _sedeCredsCache = data || [];
+  } catch (err) {
+    // Si las columnas no existen aún (migración pendiente), retornar vacío
+    console.warn("⚠️ No se pudieron leer credenciales WC por sede (¿migración pendiente?):", err.message);
+    _sedeCredsCache = [];
+  }
+  _sedeCredsCacheTime = Date.now();
+  return _sedeCredsCache;
+}
+
+/**
+ * Retorna un cliente Axios WooCommerce para la sede indicada.
+ * Usa la wc_url de la tabla wc_sedes + credenciales del .env como fallback.
+ * Para PV001 usa el cliente principal directamente.
+ */
+export async function getWooClientForSede(sedeCode) {
+  // PV001 usa el cliente principal
+  if (sedeCode === "PV001") return wooApi;
+
+  // Check cache
+  if (_sedeClientsCache.has(sedeCode)) return _sedeClientsCache.get(sedeCode);
+
+  const sedes = await getSedeCredentials();
+  const sede = sedes.find(s => s.codigo_siesa === sedeCode);
+
+  if (!sede?.wc_url) {
+    console.warn(`⚠️ Sede ${sedeCode} no tiene wc_url configurada`);
+    return null;
+  }
+
+  // Usar credenciales propias de la sede, o fallback a las del .env (compartidas)
+  const key = sede.wc_consumer_key || WC_CONSUMER_KEY;
+  const secret = sede.wc_consumer_secret || WC_CONSUMER_SECRET;
+
+  const client = axios.create({
+    baseURL: `${sede.wc_url.replace(/\/$/, "")}/wp-json/wc/v3`,
+    auth: {
+      username: key,
+      password: secret,
+    },
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "GestorEcommerce-App/1.0"
+    },
+    timeout: 15000,
+  });
+
+  _sedeClientsCache.set(sedeCode, client);
+  console.log(`✅ Cliente WC creado para sede ${sedeCode} → ${sede.wc_url}`);
+  return client;
+}
+
+/**
+ * Retorna un Map<sedeCode, axiosClient> con TODAS las sedes activas.
+ */
+export async function getAllSedeWooClients() {
+  const sedes = await getSedeCredentials();
+  const clients = new Map();
+  // Siempre incluir PV001
+  clients.set("PV001", wooApi);
+  for (const sede of sedes) {
+    if (sede.codigo_siesa === "PV001" || !sede.wc_url) continue;
+    const client = await getWooClientForSede(sede.codigo_siesa);
+    if (client) clients.set(sede.codigo_siesa, client);
+  }
+  return clients;
+}
 
 // --- Test de conexión ---
 export async function testWooConnection() {

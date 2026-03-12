@@ -64,7 +64,7 @@ const GestorEcommerce = () => {
       case 'dashboard':
         return <DashboardGestorEcommerce setActiveTab={setActiveTab} sedeInfo={sedeActual} />;
       case 'catalog':
-        return <CatalogManager sedeInfo={sedeActual} />;
+        return <CatalogManager sedeInfo={sedeActual} sedes={sedes} />;
       case 'audit':
         return <LiveComparison sedeInfo={sedeActual} esAdminGlobal={esAdminGlobal} sedes={sedes} onSedeChange={handleSedeChange} />;
       case 'banners':

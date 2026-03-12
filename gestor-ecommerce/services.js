@@ -44,11 +44,11 @@ export async function runFullAudit(sede) {
   return res.json();
 }
 
-export async function toggleProduct(item, active) {
+export async function toggleProduct(item, active, sede) {
   const res = await fetch(`${API_URL}/catalog/toggle`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item, active })
+    body: JSON.stringify({ item, active, sede })
   });
   return res.json();
 }
@@ -60,7 +60,7 @@ export async function adoptWooProducts() {
   return res.json();
 }
 
-export async function fetchCatalog({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false } = {}) {
+export async function fetchCatalog({ page = 1, pageSize = 20, search = "", filter = "all", exactSearch = false, sede = "" } = {}) {
   const params = new URLSearchParams({
     page: page.toString(),
     pageSize: pageSize.toString(),
@@ -69,6 +69,7 @@ export async function fetchCatalog({ page = 1, pageSize = 20, search = "", filte
   });
   if (search.trim()) params.append("search", search.trim());
   if (exactSearch) params.append("exactSearch", "true");
+  if (sede) params.append("sede", sede);
 
   const res = await fetch(`${API_URL}/catalog?${params}`);
   return res.json();

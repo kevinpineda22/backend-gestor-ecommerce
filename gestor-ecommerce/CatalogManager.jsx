@@ -4,7 +4,7 @@ import "./GestorEcommerce.css";
 import "./components/CatalogManager.css";
 import ProductEditModal from "./components/ProductEditModal";
 
-export default function CatalogManager({ sedeInfo }) {
+export default function CatalogManager({ sedeInfo, sedes = [] }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -26,11 +26,20 @@ export default function CatalogManager({ sedeInfo }) {
   const [categories, setCategories] = useState([]);
   const [tags, setTags] = useState([]);
 
+  const currentSede = sedeInfo?.codigo_siesa || "PV001";
+
+  // Mapa de codigo_siesa → nombre corto para badges
+  const sedeShortNames = {};
+  sedes.forEach(s => {
+    const parts = s.nombre.split(' ');
+    sedeShortNames[s.codigo_siesa] = parts[parts.length - 1]; // Última palabra
+  });
+
   // --- CARGA DE DATOS (PAGINADA) ---
   const loadCatalog = async (p = page, s = search, f = filterType, exact = false) => {
     setLoading(true);
     try {
-      const res = await fetchCatalog({ page: p, pageSize, search: s, filter: f, exactSearch: exact });
+      const res = await fetchCatalog({ page: p, pageSize, search: s, filter: f, exactSearch: exact, sede: currentSede });
       if (res.ok) {
         setData(res.data);
         setTotalPages(res.totalPages || 1);
@@ -78,6 +87,15 @@ export default function CatalogManager({ sedeInfo }) {
     return () => { if (searchDebounce) clearTimeout(searchDebounce); };
   }, []);
 
+  // Recargar cuando cambia la sede seleccionada
+  useEffect(() => {
+    if (currentSede) {
+      setPage(1);
+      setFilterType('all');
+      loadCatalog(1, search, 'all');
+    }
+  }, [currentSede]);
+
   // Recargar cuando cambia el filtro
   useEffect(() => {
     if (page === 1) {
@@ -118,20 +136,27 @@ export default function CatalogManager({ sedeInfo }) {
     const targetIndex = newData.findIndex(d => d.item === item);
     if (targetIndex === -1) return;
 
-    // Optimistic
-    newData[targetIndex].ecommerce_active = !currentStatus;
+    // Optimistic update per-sede
+    const prevActiveSedes = { ...(newData[targetIndex].active_sedes || {}) };
+    newData[targetIndex].active_sedes = { ...prevActiveSedes, [currentSede]: !currentStatus };
+    newData[targetIndex].ecommerce_active = Object.values(newData[targetIndex].active_sedes).some(v => v === true);
     setData(newData);
 
     try {
-      const res = await toggleProduct(item, !currentStatus);
+      const res = await toggleProduct(item, !currentStatus, currentSede);
       if (!res.ok) {
+        newData[targetIndex].active_sedes = prevActiveSedes;
         newData[targetIndex].ecommerce_active = currentStatus;
-        setData(newData);
+        setData([...newData]);
         alert("Error al actualizar estado");
+      } else if (res.active_sedes) {
+        newData[targetIndex].active_sedes = res.active_sedes;
+        setData([...newData]);
       }
     } catch (error) {
+      newData[targetIndex].active_sedes = prevActiveSedes;
       newData[targetIndex].ecommerce_active = currentStatus;
-      setData(newData);
+      setData([...newData]);
     }
   };
 
@@ -241,6 +266,7 @@ export default function CatalogManager({ sedeInfo }) {
               exists_in_woo: true,
               woo_product_id: res.data?.id,
               ecommerce_active: true,
+              active_sedes: { ...(d.active_sedes || {}), [currentSede]: true },
               ecommerce_name: modifiedItem.name,
               image_url: mainImage
             };
@@ -342,7 +368,7 @@ export default function CatalogManager({ sedeInfo }) {
       <div className="ge-header">
         <div className="ge-title">
           <h2>Gestor de Catálogo</h2>
-          <p>Activa productos y asigna categorías</p>
+          <p>Configurando: <strong>{sedeInfo?.nombre || 'Sede'}</strong> — Activa productos y asigna categorías</p>
         </div>
 
         <div className="ge-controls">
@@ -368,9 +394,9 @@ export default function CatalogManager({ sedeInfo }) {
         </div>
 
         <div className={`ge-stat-card filter-card ${filterType === 'active' ? 'active' : ''}`} onClick={() => setFilterType('active')} style={{ cursor: 'pointer' }}>
-          <h3 style={{ color: 'var(--ge-success)' }}>Publicados</h3>
+          <h3 style={{ color: 'var(--ge-success)' }}>Activos en {sedeInfo?.nombre?.split(' ').pop() || 'Sede'}</h3>
           <div className="ge-stat-value" style={{ color: 'var(--ge-success)' }}>{counts.active}</div>
-          <div className="ge-stat-desc">Visibles actualmente en la tienda online</div>
+          <div className="ge-stat-desc">Publicados para esta sede</div>
         </div>
 
         <div className={`ge-stat-card filter-card ${filterType === 'unlinked' ? 'active' : ''}`} onClick={() => setFilterType('unlinked')} style={{ cursor: 'pointer' }}>
@@ -389,17 +415,21 @@ export default function CatalogManager({ sedeInfo }) {
                 <th>SKU / Item</th>
                 <th>Descripción</th>
                 <th>Grupo / Marca</th>
-                <th className="text-center">Estado Woo</th>
+                <th className="text-center">Estado Sede</th>
+                <th className="text-center">Sedes</th>
                 <th className="text-center">Acción</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" className="ge-loading">Cargando catálogo...</td></tr>
+                <tr><td colSpan="7" className="ge-loading">Cargando catálogo...</td></tr>
               ) : data.length === 0 ? (
-                <tr><td colSpan="6" className="ge-loading">No se encontraron productos</td></tr>
+                <tr><td colSpan="7" className="ge-loading">No se encontraron productos</td></tr>
               ) : (
-                data.map((row) => (
+                data.map((row) => {
+                  const isActiveInSede = row.active_sedes?.[currentSede] === true;
+                  const activeSedeCodes = Object.entries(row.active_sedes || {}).filter(([, v]) => v === true).map(([k]) => k);
+                  return (
                   <tr key={row.item} className={!row.exists_in_woo ? "ge-row-warning" : ""}>
                     <td>
                       {row.image_url ? (
@@ -412,39 +442,56 @@ export default function CatalogManager({ sedeInfo }) {
                     </td>
                     <td><div style={{ fontWeight: 500 }}>{row.ecommerce_name || row.descripcion}</div></td>
                     <td>
-                      {/* Lógica Display: Preferir Cache DB Woo > Siesa */}
                       {row.exists_in_woo && (row.woo_category_names || row.woo_tag_names) ? (
                         <div style={{ fontSize: '0.85rem', color: '#4f46e5' }}>
-                          {/* Categorías Woo desde Cache */}
                           {row.woo_category_names || 'Sin categoría'}
                           <br />
-                          {/* Tags Woo desde Cache */}
                           <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
                             {row.woo_tag_names}
                           </span>
                         </div>
                       ) : (
                         <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
-                          {/* Fallback a Siesa */}
                           {row.subgrupo} <br /> <span style={{ color: '#9ca3af' }}>{row.marca}</span>
                         </div>
                       )}
                     </td>
                     <td className="text-center">
-                      {row.ecommerce_active ? <span className="ge-badge status-OK">Publicado</span> : <span className="ge-badge status-NO_EXISTE_WOO">Inactivo</span>}
+                      {isActiveInSede
+                        ? <span className="ge-badge status-OK">Activo</span>
+                        : <span className="ge-badge status-NO_EXISTE_WOO">Inactivo</span>}
                     </td>
                     <td className="text-center">
-                      {/* Toggle simple */}
+                      {activeSedeCodes.length > 0 ? (
+                        <div style={{ display: 'flex', gap: '3px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          {sedes.map(s => {
+                            const isOn = row.active_sedes?.[s.codigo_siesa] === true;
+                            return (
+                              <span key={s.codigo_siesa} title={s.nombre} style={{
+                                display: 'inline-block', padding: '2px 5px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 600,
+                                background: isOn ? '#dcfce7' : '#f3f4f6', color: isOn ? '#166534' : '#9ca3af',
+                                border: `1px solid ${isOn ? '#bbf7d0' : '#e5e7eb'}`
+                              }}>
+                                {sedeShortNames[s.codigo_siesa] || s.codigo_siesa}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-center">
                       <label style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', opacity: !row.exists_in_woo ? 0.5 : 1 }}>
                         <input
                           type="checkbox"
-                          checked={row.ecommerce_active}
-                          onChange={() => handleToggle(row.item, row.ecommerce_active)}
+                          checked={isActiveInSede}
+                          onChange={() => handleToggle(row.item, isActiveInSede)}
                           disabled={!row.exists_in_woo}
                           style={{ opacity: 0, width: 0, height: 0 }}
                         />
-                        <span style={{ position: 'absolute', cursor: !row.exists_in_woo ? 'not-allowed' : 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: row.ecommerce_active ? '#2563eb' : '#ccc', transition: '.4s', borderRadius: '34px' }}>
-                          <span style={{ position: 'absolute', content: '""', height: '18px', width: '18px', left: row.ecommerce_active ? '22px' : '4px', bottom: '3px', backgroundColor: 'white', transition: '.4s', borderRadius: '50%' }}></span>
+                        <span style={{ position: 'absolute', cursor: !row.exists_in_woo ? 'not-allowed' : 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isActiveInSede ? '#2563eb' : '#ccc', transition: '.4s', borderRadius: '34px' }}>
+                          <span style={{ position: 'absolute', content: '""', height: '18px', width: '18px', left: isActiveInSede ? '22px' : '4px', bottom: '3px', backgroundColor: 'white', transition: '.4s', borderRadius: '50%' }}></span>
                         </span>
                       </label>
                       <button className={`ge-btn ${!row.exists_in_woo ? 'primary' : 'secondary'}`} style={{ marginLeft: '10px', padding: '4px 8px' }} onClick={() => openEdit(row)}>
@@ -452,7 +499,8 @@ export default function CatalogManager({ sedeInfo }) {
                       </button>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
