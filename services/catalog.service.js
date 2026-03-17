@@ -439,13 +439,21 @@ export async function updateProductInWoo(wooId, data) {
     payload.manage_stock = true;
   }
 
-  // Manejo de Imágenes (Múltiples)
+  // Manejo de Imágenes (Múltiples) — Soporte mixto: {id,src} (existentes) y strings (nuevas)
   if (data.images && Array.isArray(data.images) && data.images.length > 0) {
-    // FIX: Filtrar URLs vacías para evitar "woocommerce_product_image_upload_error"
-    const validImages = data.images.filter(url => url && typeof url === 'string' && url.trim().length > 0);
-    if (validImages.length > 0) {
-       payload.images = validImages.map(url => ({ src: url.trim() }));
-    }
+    const mapped = data.images
+      .filter(img => img)
+      .map(img => {
+        // Imagen existente de WooCommerce: conservar por ID (NO re-sube)
+        if (typeof img === 'object' && img.id) return { id: img.id };
+        // URL nueva (string): WC la descargará
+        if (typeof img === 'string' && img.trim().length > 0) return { src: img.trim() };
+        // Objeto sin id pero con src (fallback)
+        if (typeof img === 'object' && img.src) return { src: img.src.trim() };
+        return null;
+      })
+      .filter(Boolean);
+    if (mapped.length > 0) payload.images = mapped;
   } else if (data.image_url && typeof data.image_url === 'string' && data.image_url.trim().length > 0) {
     payload.images = [{ src: data.image_url.trim() }];
   }
@@ -634,12 +642,18 @@ export async function createProductInWoo(data) {
           regular_price: initialPrice ? String(initialPrice) : undefined
       };
 
-      // Imagen
+      // Imagen (soporte mixto: strings y {id, src} objetos)
       if (data.images && Array.isArray(data.images) && data.images.length > 0) {
-          // FIX: Filtrar URLs vacías
-          const validImages = data.images.filter(url => url && typeof url === 'string' && url.trim().length > 0);
-          if (validImages.length > 0) {
-              payload.images = validImages.map(url => ({ src: url.trim() }));
+          const mapped = data.images
+            .filter(img => img)
+            .map(img => {
+              if (typeof img === 'string' && img.trim().length > 0) return { src: img.trim() };
+              if (typeof img === 'object' && img.src) return { src: img.src.trim() };
+              return null;
+            })
+            .filter(Boolean);
+          if (mapped.length > 0) {
+              payload.images = mapped;
           }
       } else if (data.image_url && typeof data.image_url === 'string' && data.image_url.trim().length > 0) {
           payload.images = [{ src: data.image_url.trim() }];

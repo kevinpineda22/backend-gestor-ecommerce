@@ -62,6 +62,9 @@ export default function ProductEditModal({
 
   if (!localItem) return null;
 
+  // Helper: obtener src de imagen (puede ser string o {id, src})
+  const getImgSrc = (img) => typeof img === 'string' ? img : img?.src || '';
+
   // --- Helpers de clasificación ---
   const groupCats = categories.filter(c => c.parent === 0).sort((a,b) => a.name.localeCompare(b.name));
   const subGroupCats = categories.filter(c => c.parent !== 0).sort((a,b) => a.name.localeCompare(b.name));
@@ -298,7 +301,7 @@ export default function ProductEditModal({
                                     }}>
                                         {localItem.images.map((img, idx) => (
                                             <div key={idx} style={{position: 'relative', width: '70px', height: '70px', borderRadius: '4px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)'}}>
-                                                <img src={img} alt={`img-${idx}`} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                                                <img src={getImgSrc(img)} alt={`img-${idx}`} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
                                                 <button 
                                                     style={{
                                                         position: 'absolute', top: 0, right: 0, 

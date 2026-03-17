@@ -318,7 +318,8 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
           const wooCats = res.data.categories?.map(c => String(c.id)) || [];
           const wooTags = res.data.tags?.map(t => String(t.id)) || [];
           const wooBrands = res.data.brands?.map(b => String(b.id)) || [];
-          const wooImages = res.data.images?.map(img => img.src) || [];
+          // Guardar imágenes como objetos {id, src} para evitar re-uploads
+          const wooImages = res.data.images?.map(img => ({ id: img.id, src: img.src })) || [];
 
           setEditingItem(prev => prev && ({
             ...prev,
@@ -367,7 +368,9 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
       }
 
       if (res.ok) {
-        const mainImage = finalImages[0] || "";
+        // Extraer URL de la primera imagen (puede ser string o {id, src})
+        const firstImg = finalImages[0];
+        const mainImage = typeof firstImg === 'string' ? firstImg : (firstImg?.src || "");
         // Actualización optimista local
         setData(prev => prev.map(d => {
           if (modifiedItem.isNew && d.item === modifiedItem.item) {
