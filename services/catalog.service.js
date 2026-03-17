@@ -309,8 +309,8 @@ async function _buildCatalog() {
       
       return {
         item: keyRaw,
-        // Prioridad: Nombre Woo > Nombre Siesa
-        descripcion: ecommerce?.woo_name || item.f120_descripcion,
+        descripcion: item.f120_descripcion, // Siempre la descripción original del ERP
+        ecommerce_name: ecommerce?.woo_name || null,
         marca: item.marca,
         grupo: item.grupo,
         subgrupo: item.subgrupo,
@@ -391,7 +391,8 @@ export async function getCatalogPaginated({ page = 1, pageSize = 20, search = ""
         // Búsqueda parcial por coincidencias (mientras escribe)
         filtered = filtered.filter(row =>
           String(row.item).toLowerCase().includes(s) ||
-          (row.descripcion && row.descripcion.toLowerCase().includes(s))
+          (row.descripcion && row.descripcion.toLowerCase().includes(s)) ||
+          (row.ecommerce_name && row.ecommerce_name.toLowerCase().includes(s))
         );
       }
     }
@@ -525,21 +526,24 @@ export async function updateProductInWoo(wooId, data) {
     // ══ Edición de datos del producto → TODAS las sedes EN PARALELO ══
     const allClients = await getAllSedeWooClients();
 
-    // Payload sin imágenes para sedes no-PV001 (los IDs de imagen son específicos por sede)
+    // Payload para sedes no-PV001: extraer URLs de las imágenes originales (no IDs de PV001)
     const payloadOtherSedes = { ...payload };
-    if (payloadOtherSedes.images) {
-      // Convertir {id} a {src} para que otras sedes descarguen la URL en vez de buscar un ID inexistente
-      const hasOnlyIds = payloadOtherSedes.images.every(img => img.id && !img.src);
-      if (hasOnlyIds) {
-        // Solo tenemos IDs de PV001 → no enviar imágenes a otras sedes (no se las puede resolver)
-        delete payloadOtherSedes.images;
+    if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+      const otherSedeImages = data.images
+        .filter(img => img)
+        .map(img => {
+          if (typeof img === 'string' && img.trim().length > 0) return { src: img.trim() };
+          if (typeof img === 'object' && img.src) return { src: img.src.trim() };
+          return null;
+        })
+        .filter(Boolean);
+      if (otherSedeImages.length > 0) {
+        payloadOtherSedes.images = otherSedeImages;
       } else {
-        // Hay URLs nuevas → enviar solo las que tienen src
-        payloadOtherSedes.images = payloadOtherSedes.images
-          .filter(img => img.src)
-          .map(img => ({ src: img.src }));
-        if (payloadOtherSedes.images.length === 0) delete payloadOtherSedes.images;
+        delete payloadOtherSedes.images;
       }
+    } else {
+      delete payloadOtherSedes.images;
     }
 
     const updatePromises = [...allClients.entries()].map(async ([sedeCode, client]) => {
@@ -606,6 +610,9 @@ export async function updateProductInWoo(wooId, data) {
     updateLocal.last_sync = new Date();
     await supabase.from("ecommerce_products").update(updateLocal).eq("woo_product_id", wooId);
   }
+
+  // Invalidar caché para que el siguiente request refleje los cambios
+  invalidateCatalogCache();
 
   return { ok: true };
 }
