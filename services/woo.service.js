@@ -311,15 +311,27 @@ async function fetchAllWoo(endpoint) {
   return allData;
 }
 
+// ══ Caché en memoria para categorías / tags / brands ══
+let _catCache = null, _catCacheAt = 0;
+let _tagCache = null, _tagCacheAt = 0;
+let _brandCache = null, _brandCacheAt = 0;
+const META_TTL = 10 * 60 * 1000; // 10 minutos
+
+export function invalidateMetaCache() {
+  _catCache = _tagCache = _brandCache = null;
+  _catCacheAt = _tagCacheAt = _brandCacheAt = 0;
+}
+
 // --- CATEGORÍAS ---
 export async function getCategories() {
   try {
-    // Usamos fetchAllWoo para traer TODAS
+    if (_catCache && (Date.now() - _catCacheAt < META_TTL)) {
+      return { ok: true, data: _catCache };
+    }
     const data = await fetchAllWoo("/products/categories");
-    return {
-      ok: true,
-      data: data.map(c => ({ id: c.id, name: c.name, parent: c.parent }))
-    };
+    _catCache = data.map(c => ({ id: c.id, name: c.name, parent: c.parent }));
+    _catCacheAt = Date.now();
+    return { ok: true, data: _catCache };
   } catch (error) {
     console.error("Error fetching categories:", error.message);
     throw error;
@@ -329,6 +341,7 @@ export async function getCategories() {
 export async function createCategory(data) {
   try {
     const response = await wooApi.post("/products/categories", data);
+    _catCache = null; // Invalidar caché
     return {
       ok: true,
       data: response.data
@@ -355,11 +368,13 @@ export async function getProduct(id) {
 // --- ETIQUETAS (TAGS) PARA MARCAS ---
 export async function getTags() {
   try {
+    if (_tagCache && (Date.now() - _tagCacheAt < META_TTL)) {
+      return { ok: true, data: _tagCache };
+    }
     const data = await fetchAllWoo("/products/tags");
-    return {
-      ok: true,
-      data: data.map(t => ({ id: t.id, name: t.name, slug: t.slug, count: t.count, taxonomy: 'tag' }))
-    };
+    _tagCache = data.map(t => ({ id: t.id, name: t.name, slug: t.slug, count: t.count, taxonomy: 'tag' }));
+    _tagCacheAt = Date.now();
+    return { ok: true, data: _tagCache };
   } catch (error) {
     console.error("Error fetching tags:", error.message);
     throw error;
@@ -368,13 +383,14 @@ export async function getTags() {
 
 export async function getBrands() {
   try {
+    if (_brandCache && (Date.now() - _brandCacheAt < META_TTL)) {
+      return { ok: true, data: _brandCache };
+    }
     const data = await fetchAllWoo("/products/brands");
-    return {
-      ok: true,
-      data: data.map(b => ({ id: b.id, name: b.name, slug: b.slug, count: b.count, taxonomy: 'brand' }))
-    };
+    _brandCache = data.map(b => ({ id: b.id, name: b.name, slug: b.slug, count: b.count, taxonomy: 'brand' }));
+    _brandCacheAt = Date.now();
+    return { ok: true, data: _brandCache };
   } catch (error) {
-    // Si falla (por ejemplo, no existe el plugin), retornamos array vacío
     console.warn("Endpoint /products/brands not found or failed. Ignoring brands.");
     return { ok: true, data: [] };
   }
@@ -384,6 +400,7 @@ export async function createTag(data) {
   try {
     // data espera: { name: "Nueva Marca" }
     const response = await wooApi.post("/products/tags", data);
+    _tagCache = null; // Invalidar caché
     return {
       ok: true,
       data: response.data
@@ -397,6 +414,7 @@ export async function createTag(data) {
 export async function deleteTag(id) {
   try {
     const response = await wooApi.delete(`/products/tags/${id}`, { params: { force: true } });
+    _tagCache = null; // Invalidar caché
     return {
       ok: true,
       data: response.data
@@ -435,5 +453,12 @@ export async function getSalesStats(period = "month") {
     return null;
   }
 }
+
+// Pre-warm: cargar categorías/tags/brands al iniciar para que estén listas
+setTimeout(() => {
+  Promise.all([getCategories(), getTags(), getBrands()])
+    .then(() => console.log("✅ Meta cache (categories/tags/brands) pre-warmed"))
+    .catch(e => console.warn("⚠️ Meta cache pre-warm partial:", e.message));
+}, 2000);
 
 export default wooApi;

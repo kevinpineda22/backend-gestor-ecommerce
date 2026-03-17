@@ -525,6 +525,23 @@ export async function updateProductInWoo(wooId, data) {
     // ══ Edición de datos del producto → TODAS las sedes EN PARALELO ══
     const allClients = await getAllSedeWooClients();
 
+    // Payload sin imágenes para sedes no-PV001 (los IDs de imagen son específicos por sede)
+    const payloadOtherSedes = { ...payload };
+    if (payloadOtherSedes.images) {
+      // Convertir {id} a {src} para que otras sedes descarguen la URL en vez de buscar un ID inexistente
+      const hasOnlyIds = payloadOtherSedes.images.every(img => img.id && !img.src);
+      if (hasOnlyIds) {
+        // Solo tenemos IDs de PV001 → no enviar imágenes a otras sedes (no se las puede resolver)
+        delete payloadOtherSedes.images;
+      } else {
+        // Hay URLs nuevas → enviar solo las que tienen src
+        payloadOtherSedes.images = payloadOtherSedes.images
+          .filter(img => img.src)
+          .map(img => ({ src: img.src }));
+        if (payloadOtherSedes.images.length === 0) delete payloadOtherSedes.images;
+      }
+    }
+
     const updatePromises = [...allClients.entries()].map(async ([sedeCode, client]) => {
       try {
         let productId = null;
@@ -536,7 +553,8 @@ export async function updateProductInWoo(wooId, data) {
         }
 
         if (productId) {
-          const response = await client.put(`/products/${productId}`, payload);
+          const sedePayload = sedeCode === "PV001" ? payload : payloadOtherSedes;
+          const response = await client.put(`/products/${productId}`, sedePayload);
           console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
           return { sede: sedeCode, ok: true, response: sedeCode === "PV001" ? response.data : null };
         }
@@ -563,8 +581,10 @@ export async function updateProductInWoo(wooId, data) {
 
   // 2. Update Local Mirror
   const updateLocal = {};
-  if (data.images && data.images.length > 0) updateLocal.image_url = data.images[0];
-  else if (data.image_url) updateLocal.image_url = data.image_url;
+  if (data.images && data.images.length > 0) {
+    const first = data.images[0];
+    updateLocal.image_url = typeof first === 'string' ? first : (first?.src || "");
+  } else if (data.image_url) updateLocal.image_url = data.image_url;
   if (data.name) updateLocal.woo_name = data.name; 
   
   // FIX: Guardar categorías y tags en local desde la RESPUESTA de Woo
