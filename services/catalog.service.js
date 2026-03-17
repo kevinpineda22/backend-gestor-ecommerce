@@ -223,6 +223,7 @@ async function fetchAllRows(table, select, orderBy = null) {
 // ═══════════════════════════════════════════════════════════════
 let _catalogCache = null;
 let _catalogCacheTime = 0;
+let _catalogRefreshing = false; // Flag para evitar refreshes simultáneos
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 export function invalidateCatalogCache() {
@@ -231,14 +232,42 @@ export function invalidateCatalogCache() {
   console.log("🗑️ Caché de catálogo invalidado");
 }
 
+// Refresh en background (no bloquea al usuario)
+function triggerBackgroundRefresh() {
+  if (_catalogRefreshing) return;
+  _catalogRefreshing = true;
+  console.log("🔄 Refrescando catálogo en background...");
+  _buildCatalog().then(catalog => {
+    _catalogCache = catalog;
+    _catalogCacheTime = Date.now();
+    console.log("✅ Catálogo refrescado en background");
+  }).catch(err => {
+    console.error("❌ Error en background refresh:", err.message);
+  }).finally(() => {
+    _catalogRefreshing = false;
+  });
+}
+
 async function getFullCatalog() {
-  // Si el caché es válido, retornar inmediatamente
-  if (_catalogCache && (Date.now() - _catalogCacheTime) < CACHE_TTL_MS) {
-    console.log("⚡ Catálogo servido desde caché en memoria");
+  // STALE-WHILE-REVALIDATE:
+  // Si hay caché (aunque sea viejo), servirlo inmediatamente.
+  // Si el TTL expiró, disparar refresh en background.
+  if (_catalogCache) {
+    if ((Date.now() - _catalogCacheTime) >= CACHE_TTL_MS) {
+      triggerBackgroundRefresh();
+    }
     return _catalogCache;
   }
 
-  console.log("📥 Descargando catálogo completo (sin caché)...");
+  // Cold start: no hay caché, hay que esperar
+  const catalog = await _buildCatalog();
+  _catalogCache = catalog;
+  _catalogCacheTime = Date.now();
+  return catalog;
+}
+
+async function _buildCatalog() {
+  console.log("📥 Descargando catálogo completo...");
   const start = Date.now();
 
   try {
@@ -299,16 +328,18 @@ async function getFullCatalog() {
     
     console.log(`🚀 Catálogo unificado: ${catalog.length} items (${Date.now() - start}ms total)`);
 
-    // Guardar en caché
-    _catalogCache = catalog;
-    _catalogCacheTime = Date.now();
-
     return catalog;
   } catch (error) {
-    console.error("Error en getFullCatalog:", error);
+    console.error("Error en _buildCatalog:", error);
     throw error;
   }
 }
+
+// Pre-warm: cargar catálogo al iniciar el módulo
+setTimeout(() => {
+  console.log("🔥 Pre-warming catálogo...");
+  getFullCatalog().catch(err => console.error("Pre-warm falló:", err.message));
+}, 1000);
 
 // Mantener compatibilidad con el endpoint original (retorna TODO)
 export async function getCatalog() {
@@ -483,13 +514,12 @@ export async function updateProductInWoo(wooId, data) {
     sedeResults.push({ sede: data.sede, ok: true });
     console.log(`✅ Precio/stock sincronizado en sede ${data.sede} (id=${productId})`);
   } else {
-    // ══ Edición de datos del producto → TODAS las sedes ══
+    // ══ Edición de datos del producto → TODAS las sedes EN PARALELO ══
     const allClients = await getAllSedeWooClients();
 
-    for (const [sedeCode, client] of allClients) {
+    const updatePromises = [...allClients.entries()].map(async ([sedeCode, client]) => {
       try {
         let productId = null;
-
         if (sedeCode === "PV001") {
           productId = wooId;
         } else if (sku) {
@@ -499,19 +529,24 @@ export async function updateProductInWoo(wooId, data) {
 
         if (productId) {
           const response = await client.put(`/products/${productId}`, payload);
-          if (sedeCode === "PV001") wooResponse = response.data;
-          sedeResults.push({ sede: sedeCode, ok: true });
           console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
-        } else {
-          sedeResults.push({ sede: sedeCode, ok: false, reason: "SKU no encontrado" });
+          return { sede: sedeCode, ok: true, response: sedeCode === "PV001" ? response.data : null };
         }
+        return { sede: sedeCode, ok: false, reason: "SKU no encontrado" };
       } catch (error) {
         const msg = error.response?.data?.message || error.message;
         console.error(`❌ Error actualizando en sede ${sedeCode}:`, msg);
-        sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
-        if (sedeCode === "PV001") {
-          throw new Error(`WooCommerce rechazó la actualización: ${msg}`);
-        }
+        return { sede: sedeCode, ok: false, reason: msg };
+      }
+    });
+
+    const results = await Promise.allSettled(updatePromises);
+    for (const r of results) {
+      const val = r.status === 'fulfilled' ? r.value : { sede: '?', ok: false, reason: r.reason?.message };
+      sedeResults.push(val);
+      if (val.sede === "PV001" && val.response) wooResponse = val.response;
+      if (val.sede === "PV001" && !val.ok) {
+        throw new Error(`WooCommerce rechazó la actualización: ${val.reason}`);
       }
     }
   }
@@ -645,13 +680,68 @@ export async function createProductInWoo(data) {
       const response = await wooApi.post("/products", payload);
       const newWooId = response.data.id;
       
-      console.log(`✅ Producto creado en Woo: ${newWooId} - ${response.data.name}`);
+      console.log(`✅ Producto creado en PV001: ${newWooId} - ${response.data.name}`);
+
+      // ══════════════════════════════════════════════════════════════
+      // CREAR EN TODAS LAS SEDES con precio/stock respectivo
+      // ══════════════════════════════════════════════════════════════
+      const allClients = await getAllSedeWooClients();
+      const { data: sedesConfig } = await supabase
+        .from("wc_sedes")
+        .select("codigo_siesa, lista_precio")
+        .eq("activa", true);
+      const sedeListaMap = {};
+      (sedesConfig || []).forEach(s => { sedeListaMap[s.codigo_siesa] = s.lista_precio; });
+
+      const sedeCreateResults = [];
+      const activeSedes = { PV001: true };
+
+      // Crear en paralelo en las otras sedes
+      const otherSedes = [...allClients.entries()].filter(([code]) => code !== "PV001");
+      if (otherSedes.length > 0) {
+        const createPromises = otherSedes.map(async ([sedeCode, client]) => {
+          try {
+            // Obtener precio/stock de SIESA para esta sede
+            const lista = sedeListaMap[sedeCode] || "GRAL";
+            const [sedeStock, sedePrice] = await Promise.all([
+              getLiveStockForItem({ item: data.sku, sede: sedeCode }).catch(() => null),
+              getLivePriceForItem({ item: data.sku, sedeLista: lista }).catch(() => null)
+            ]);
+
+            let sStock = 0;
+            if (sedeStock?.disponible != null) sStock = sedeStock.disponible;
+            else if (sedeStock?.existencia != null) sStock = sedeStock.existencia;
+
+            const sPrice = sedePrice?.precio ?? initialPrice;
+
+            const sedePayload = {
+              ...payload,
+              stock_quantity: sStock,
+              regular_price: sPrice ? String(sPrice) : undefined
+            };
+
+            const sedeRes = await client.post("/products", sedePayload);
+            console.log(`✅ Producto creado en sede ${sedeCode}: ${sedeRes.data.id} (stock=${sStock}, price=${sPrice})`);
+            activeSedes[sedeCode] = true;
+            return { sede: sedeCode, ok: true, id: sedeRes.data.id };
+          } catch (err) {
+            const msg = err.response?.data?.message || err.message;
+            console.error(`❌ Error creando en sede ${sedeCode}:`, msg);
+            return { sede: sedeCode, ok: false, reason: msg };
+          }
+        });
+
+        const results = await Promise.allSettled(createPromises);
+        for (const r of results) {
+          sedeCreateResults.push(r.status === 'fulfilled' ? r.value : { sede: '?', ok: false });
+        }
+      }
+
+      console.log("📊 Creación multi-sede:", sedeCreateResults);
       
       // REGISTRAR EN SUPABASE PARA VINCULARLO INMEDIATAMENTE
-      // Buscamos si ya existe registro por SKU (muy probable que si, viniendo de Siesa)
       const { data: existing } = await supabase.from("ecommerce_products").select("*").eq("item", data.sku).single();
       
-      // Preparar strings de categorías/tags para cache local
       let catNames = null;
       let tagNames = null;
       if (response.data.categories && Array.isArray(response.data.categories)) {
@@ -661,29 +751,29 @@ export async function createProductInWoo(data) {
           tagNames = response.data.tags.map(t => t.name).join(", ");
       }
 
+      // Merge active_sedes: sede que hizo la creación + todas las que crearon ok
       const creatingSede = data.sede || "PV001";
+      activeSedes[creatingSede] = true;
 
       if (existing) {
-          // Actualizar registro existente
-          const updatedSedes = { ...(existing.active_sedes || {}), [creatingSede]: true };
+          const mergedSedes = { ...(existing.active_sedes || {}), ...activeSedes };
           await supabase.from("ecommerce_products").update({
               woo_product_id: newWooId,
               woo_status: 'publish',
               ecommerce_active: true,
-              active_sedes: updatedSedes,
+              active_sedes: mergedSedes,
               last_sync: new Date(),
               image_url: data.image_url || existing.image_url,
               woo_category_names: catNames,
               woo_tag_names: tagNames
           }).eq("item", data.sku);
       } else {
-          // Crear registro nuevo
           await supabase.from("ecommerce_products").insert({
               item: data.sku,
               woo_product_id: newWooId,
               woo_status: 'publish',
               ecommerce_active: true,
-              active_sedes: { [creatingSede]: true },
+              active_sedes: activeSedes,
               last_sync: new Date(),
               image_url: data.image_url,
               woo_category_names: catNames,
@@ -691,9 +781,12 @@ export async function createProductInWoo(data) {
           });
       }
 
+      invalidateCatalogCache();
+
       return {
           ok: true,
-          data: response.data
+          data: response.data,
+          sedeResults: sedeCreateResults
       };
 
   } catch (error) {
