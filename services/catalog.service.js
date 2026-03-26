@@ -924,6 +924,16 @@ export async function toggleCatalogItem({ item, active, sedeCode = "PV001" }) {
 export async function adoptWooProducts() {
   console.log("🚀 Iniciando sincronización completa de productos Woo");
 
+  // Pre-fetch: obtener sedes activas para incluir active_sedes directamente en el upsert
+  const { data: allSedes } = await supabase.from("wc_sedes").select("codigo_siesa").eq("activa", true);
+  const allSedesActive = {};
+  const allSedesInactive = {};
+  (allSedes || []).forEach(s => {
+    allSedesActive[s.codigo_siesa] = true;
+    allSedesInactive[s.codigo_siesa] = false;
+  });
+  console.log(`📍 Sedes activas: ${Object.keys(allSedesActive).join(', ')}`);
+
   let page = 1;
   const perPage = 100;
   let totalProcessed = 0;
@@ -978,10 +988,11 @@ export async function adoptWooProducts() {
         woo_product_id: p.id,
         woo_status: p.status,
         ecommerce_active: p.status === "publish",
+        active_sedes: p.status === "publish" ? allSedesActive : allSedesInactive,
         image_url: p.images?.[0]?.src || null,
         woo_name: p.name, 
-        woo_category_names: catNames, // NUEVO CAMPO CACHE
-        woo_tag_names: tagNames, // NUEVO CAMPO CACHE
+        woo_category_names: catNames,
+        woo_tag_names: tagNames,
         last_sync: new Date().toISOString()
       });
     }
@@ -1081,31 +1092,32 @@ export async function adoptWooProducts() {
   console.log("🏁 Sincronización finalizada");
   console.log(`🎉 Total productos procesados: ${totalProcessed}`);
 
-  // Inicializar active_sedes para productos que no lo tienen
-  // Obtener todos los codigos de sede activos
-  const { data: allSedes } = await supabase.from("wc_sedes").select("codigo_siesa").eq("activa", true);
-  const allSedesObj = {};
-  (allSedes || []).forEach(s => { allSedesObj[s.codigo_siesa] = true; });
+  // Safety net: migrar productos activos que por alguna razón quedaron sin active_sedes
+  console.log("🏷️ Verificando active_sedes para productos activos...");
   
-  console.log("🏷️ Inicializando active_sedes para productos sin configuración por sede...");
+  let needsMigration = [];
+  try {
+    const allActive = await fetchAllRows("ecommerce_products", "item, active_sedes, ecommerce_active");
+    needsMigration = allActive.filter(r => 
+      r.ecommerce_active === true && 
+      (!r.active_sedes || Object.keys(r.active_sedes).length === 0)
+    );
+  } catch (err) {
+    console.error("❌ Error buscando productos sin active_sedes:", err.message);
+  }
   
-  // Buscar productos activos sin active_sedes y actualizarlos en lote
-  const { data: needsMigration } = await supabase
-    .from("ecommerce_products")
-    .select("item")
-    .eq("ecommerce_active", true)
-    .or("active_sedes.is.null,active_sedes.eq.{}");
-  
-  if (needsMigration && needsMigration.length > 0) {
+  if (needsMigration.length > 0) {
     const migrateBatch = 200;
     for (let i = 0; i < needsMigration.length; i += migrateBatch) {
       const batch = needsMigration.slice(i, i + migrateBatch);
       const items = batch.map(r => r.item);
       await supabase.from("ecommerce_products")
-        .update({ active_sedes: allSedesObj })
+        .update({ active_sedes: allSedesActive })
         .in("item", items);
     }
-    console.log(`✅ Migrados ${needsMigration.length} productos a active_sedes (${Object.keys(allSedesObj).join(', ')})`);
+    console.log(`✅ Migrados ${needsMigration.length} productos a active_sedes`);
+  } else {
+    console.log("✅ Todos los productos activos ya tienen active_sedes configurado");
   }
 
   // Invalidar caché para que la próxima carga refleje los cambios
