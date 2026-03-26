@@ -1230,14 +1230,16 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
         let wooInfo;
         let sedeWooProductId = p.woo_product_id;
         if (sede === "PV001" || !sede) {
-          wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null };
+          wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null, type: 'simple', variations: [] };
         } else {
-          const skuInfo = skuWooMap[p.item] || { price: null, stock: null, woo_product_id: null };
+          const skuInfo = skuWooMap[p.item] || { price: null, stock: null, woo_product_id: null, type: 'simple', variations: [] };
           wooInfo = skuInfo;
           if (skuInfo.woo_product_id) sedeWooProductId = skuInfo.woo_product_id;
         }
         const wooPrice = wooInfo.price;
         const wooStock = wooInfo.stock;
+        const productType = wooInfo.type || 'simple';
+        const variations = wooInfo.variations || [];
 
         let priceStatus = "OK";
         let priceDiff = null;
@@ -1265,6 +1267,17 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
           stock_disponible: stock?.disponible ?? 0,
           stock_existencia: stock?.existencia ?? 0,
           stock_comprometido: stock?.pos ?? 0,
+          product_type: productType,
+          variations: variations.map(v => {
+            const varName = v.attributes?.map(a => a.option).join(', ') || v.sku || `#${v.id}`;
+            return {
+              id: v.id,
+              sku: v.sku || '',
+              name: varName,
+              price: v.price,
+              stock: v.stock
+            };
+          })
         };
       })
     );

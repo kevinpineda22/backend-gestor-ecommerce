@@ -193,18 +193,49 @@ export async function getWooPricesByIds(ids, sedeCode) {
       params: {
         include: validIds.join(","),
         per_page: 100,
-        _fields: "id,sku,price,regular_price,stock_quantity,manage_stock",
+        _fields: "id,sku,price,regular_price,stock_quantity,manage_stock,type",
       },
     });
 
     const dataMap = {};
+    const variableIds = [];
+
     response.data.forEach((p) => {
       const price = Number(p.price) || Number(p.regular_price) || 0;
       dataMap[p.id] = {
         price,
-        stock: p.manage_stock ? (p.stock_quantity || 0) : null
+        stock: p.manage_stock ? (p.stock_quantity || 0) : null,
+        type: p.type || 'simple',
+        variations: []
       };
+      if (p.type === 'variable') variableIds.push(p.id);
     });
+
+    // Fetch variations for variable products in parallel
+    if (variableIds.length > 0) {
+      const varResults = await Promise.all(
+        variableIds.map(async (parentId) => {
+          try {
+            const varRes = await wooApi.get(`/products/${parentId}/variations`, {
+              params: { per_page: 100, _fields: "id,sku,price,regular_price,stock_quantity,manage_stock,attributes" }
+            });
+            return { parentId, variations: varRes.data };
+          } catch (e) {
+            console.warn(`⚠️ Error fetching variations for ${parentId}:`, e.message);
+            return { parentId, variations: [] };
+          }
+        })
+      );
+      for (const { parentId, variations } of varResults) {
+        dataMap[parentId].variations = variations.map(v => ({
+          id: v.id,
+          sku: v.sku,
+          price: Number(v.price) || Number(v.regular_price) || 0,
+          stock: v.manage_stock ? (v.stock_quantity || 0) : null,
+          attributes: v.attributes || []
+        }));
+      }
+    }
 
     return dataMap;
   } catch (error) {
@@ -224,9 +255,6 @@ export async function getWooPricesBySkus(skus, sedeCode) {
   if (!client) return {};
 
   const dataMap = {};
-  // WC API no soporta buscar por múltiples SKUs en batch,
-  // pero sí podemos traer todos los productos y filtrar.
-  // Para eficiencia, hacemos batches de SKUs individuales en paralelo.
   const BATCH = 10;
   for (let i = 0; i < skus.length; i += BATCH) {
     const batch = skus.slice(i, i + BATCH);
@@ -234,20 +262,40 @@ export async function getWooPricesBySkus(skus, sedeCode) {
       batch.map(async (sku) => {
         try {
           const res = await client.get("/products", {
-            params: { sku, per_page: 1, _fields: "id,sku,price,regular_price,stock_quantity,manage_stock" }
+            params: { sku, per_page: 1, _fields: "id,sku,price,regular_price,stock_quantity,manage_stock,type" }
           });
           if (res.data.length > 0) {
             const p = res.data[0];
-            return {
+            const entry = {
               sku,
               woo_product_id: p.id,
               price: Number(p.price) || Number(p.regular_price) || 0,
-              stock: p.manage_stock ? (p.stock_quantity || 0) : null
+              stock: p.manage_stock ? (p.stock_quantity || 0) : null,
+              type: p.type || 'simple',
+              variations: []
             };
+            // Fetch variations for variable products
+            if (p.type === 'variable') {
+              try {
+                const varRes = await client.get(`/products/${p.id}/variations`, {
+                  params: { per_page: 100, _fields: "id,sku,price,regular_price,stock_quantity,manage_stock,attributes" }
+                });
+                entry.variations = varRes.data.map(v => ({
+                  id: v.id,
+                  sku: v.sku,
+                  price: Number(v.price) || Number(v.regular_price) || 0,
+                  stock: v.manage_stock ? (v.stock_quantity || 0) : null,
+                  attributes: v.attributes || []
+                }));
+              } catch (e) {
+                console.warn(`⚠️ Error fetching variations for ${p.id} in sede ${sedeCode}:`, e.message);
+              }
+            }
+            return entry;
           }
-          return { sku, woo_product_id: null, price: null, stock: null };
+          return { sku, woo_product_id: null, price: null, stock: null, type: 'simple', variations: [] };
         } catch {
-          return { sku, woo_product_id: null, price: null, stock: null };
+          return { sku, woo_product_id: null, price: null, stock: null, type: 'simple', variations: [] };
         }
       })
     );
