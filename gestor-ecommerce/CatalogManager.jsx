@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
-import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, fetchTags, createTag, deleteTag, fetchProductDetail } from "./services";
+import { fetchCatalog, toggleProduct, adoptWooProducts, updateWooProduct, createWooProduct, uploadImage, fetchCategories, fetchTags, createTag, deleteTag, fetchProductDetail, fetchVariations, updateVariationImage } from "./services";
 import "./GestorEcommerce.css";
 import "./components/CatalogManager.css";
 import ProductEditModal from "./components/ProductEditModal";
@@ -224,7 +224,7 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
     if (e.key === 'Enter') {
       if (searchTimer.current) clearTimeout(searchTimer.current);
       setPage(1);
-      loadCatalog(1, search, filterType, true);
+      loadCatalog(1, search, filterType);
     }
   }, [search, filterType, loadCatalog]);
 
@@ -262,6 +262,11 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
       updated[idx] = row;
       return updated;
     });
+    // Actualizar contador optimistamente
+    setCounts(prev => ({
+      ...prev,
+      active: prev.active + (!currentStatus ? 1 : -1)
+    }));
 
     try {
       const res = await toggleProduct(item, !currentStatus, currentSede);
@@ -277,9 +282,11 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
           return updated;
         });
         alert("Error al actualizar estado");
+        // Revertir contador
+        setCounts(prev => ({ ...prev, active: prev.active + (currentStatus ? 1 : -1) }));
       } else {
         if (res.active_sedes) {
-          setData(prev => prev.map(d => d.item === item ? { ...d, active_sedes: res.active_sedes } : d));
+          setData(prev => prev.map(d => d.item === item ? { ...d, active_sedes: res.active_sedes, ecommerce_active: Object.values(res.active_sedes).some(v => v === true) } : d));
         }
         invalidateCache();
       }
@@ -294,6 +301,8 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
         updated[idx] = row;
         return updated;
       });
+      // Revertir contador
+      setCounts(prev => ({ ...prev, active: prev.active + (currentStatus ? 1 : -1) }));
     }
   }, [currentSede, invalidateCache]);
 
@@ -330,7 +339,8 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
             ecommerce_active: res.data.status === 'publish',
             woo_price: parseFloat(res.data.price) || parseFloat(res.data.regular_price) || 0,
             pum_qty: res.data.meta_data?.find(m => m.key === 'pum_qty')?.value || "",
-            pum_unit: res.data.meta_data?.find(m => m.key === 'pum_unit')?.value || ""
+            pum_unit: res.data.meta_data?.find(m => m.key === 'pum_unit')?.value || "",
+            productType: res.data.type || 'simple'
           }));
         }
       } catch (error) {
@@ -368,6 +378,18 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
       }
 
       if (res.ok) {
+        // Guardar imágenes de variaciones pendientes (en paralelo)
+        const pendingVars = modifiedItem._pendingVariations || [];
+        if (pendingVars.length > 0 && modifiedItem.woo_product_id) {
+          const varResults = await Promise.allSettled(
+            pendingVars.map(v => updateVariationImage(modifiedItem.woo_product_id, v.id, v.src))
+          );
+          const failed = varResults.filter(r => r.status === 'rejected' || !r.value?.ok);
+          if (failed.length > 0) {
+            console.warn("Algunas variaciones no se actualizaron:", failed);
+          }
+        }
+
         // Extraer URL de la primera imagen (puede ser string o {id, src})
         const firstImg = finalImages[0];
         const mainImage = typeof firstImg === 'string' ? firstImg : (firstImg?.src || "");
@@ -383,7 +405,8 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
         }));
         invalidateCache();
         setEditingItem(null);
-        alert(modifiedItem.isNew ? "Producto CREADO correctamente en WooCommerce" : "Producto ACTUALIZADO correctamente");
+        const varMsg = pendingVars.length > 0 ? ` (+ ${pendingVars.length} variación(es) actualizadas)` : '';
+        alert(modifiedItem.isNew ? "Producto CREADO correctamente en WooCommerce" : `Producto ACTUALIZADO correctamente${varMsg}`);
       } else {
         alert("Error al guardar: " + res.message);
       }
@@ -525,6 +548,8 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
           onClose={closeModal} onSave={handleSaveProduct}
           onUploadImage={handleUploadImage} onCreateTag={handleCreateTag}
           onDeleteTag={handleDeleteTag} dataError={dataError}
+          onFetchVariations={fetchVariations}
+          onUpdateVariationImage={updateVariationImage}
         />
       )}
     </div>

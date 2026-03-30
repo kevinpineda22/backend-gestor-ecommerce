@@ -44,6 +44,13 @@ export async function runFullAudit(sede) {
   return res.json();
 }
 
+// Reporte de diferencias de precios (paginado)
+export async function fetchPriceDiffReport({ sede, page = 1, productFilter = 'all' }) {
+  const params = new URLSearchParams({ sede: sede || "PV001", page: String(page), productFilter });
+  const res = await fetch(`${API_URL}/catalog/price-diff-report?${params}`);
+  return res.json();
+}
+
 export async function toggleProduct(item, active, sede) {
   const res = await fetch(`${API_URL}/catalog/toggle`, {
     method: "POST",
@@ -147,6 +154,21 @@ export async function deleteTag(id) {
 
 export async function fetchProductDetail(wooId) {
     const res = await fetch(`${API_URL}/catalog/product/${wooId}`);
+    return res.json();
+}
+
+// --- VARIACIONES ---
+export async function fetchVariations(wooId) {
+    const res = await fetch(`${API_URL}/catalog/product/${wooId}/variations`);
+    return res.json();
+}
+
+export async function updateVariationImage(wooId, varId, imageSrc) {
+    const res = await fetch(`${API_URL}/catalog/product/${wooId}/variations/${varId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: { src: imageSrc } })
+    });
     return res.json();
 }
 

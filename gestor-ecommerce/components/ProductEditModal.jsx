@@ -10,9 +10,11 @@ export default function ProductEditModal({
   onUploadImage, 
   onCreateTag, // Callback para crear tag
   onDeleteTag, // Callback para eliminar tag
-  dataError 
+  dataError,
+  onFetchVariations,
+  onUpdateVariationImage
 }) {
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'classification'
+  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'classification' | 'variations'
   const [localItem, setLocalItem] = useState(null);
   
   // Estados locales de búsqueda
@@ -27,6 +29,11 @@ export default function ProductEditModal({
   
   // Estado para URL Manual (Input controlado)
   const [manualUrl, setManualUrl] = useState("");
+
+  // Estado para variaciones
+  const [variations, setVariations] = useState([]);
+  const [variationsLoading, setVariationsLoading] = useState(false);
+  const [variationsLoaded, setVariationsLoaded] = useState(false);
 
   // Ref para saber si es la primera vez que se abre (evita reset de tab al enriquecer con Woo)
   const prevProductId = useRef(null);
@@ -53,12 +60,35 @@ export default function ProductEditModal({
       // Solo resetear tab cuando se abre un producto diferente
       if (isNewProduct) {
         setActiveTab('general');
+        setVariations([]);
+        setVariationsLoaded(false);
         prevProductId.current = productKey;
       }
     } else {
       prevProductId.current = null;
     }
   }, [product]);
+
+  // Auto-cargar variaciones al detectar producto variable (DEBE estar antes del early return)
+  const isVariable = localItem?.productType === 'variable';
+  useEffect(() => {
+    if (isVariable && localItem?.woo_product_id && onFetchVariations && !variationsLoaded) {
+      // Inline load para evitar dependencia de función mutable
+      setVariationsLoading(true);
+      onFetchVariations(localItem.woo_product_id).then(res => {
+        if (res.ok) {
+          setVariations(res.data.map(v => ({
+            id: v.id,
+            attributes: v.attributes || [],
+            image: v.image || null,
+            price: v.regular_price || v.price || '',
+            sku: v.sku || ''
+          })));
+        }
+      }).catch(err => console.error('Error loading variations', err))
+        .finally(() => { setVariationsLoading(false); setVariationsLoaded(true); });
+    }
+  }, [isVariable, localItem?.woo_product_id]);
 
   if (!localItem) return null;
 
@@ -84,6 +114,12 @@ export default function ProductEditModal({
            setManualUrl("");
       }
 
+      // Adjuntar variaciones pendientes para que CatalogManager las guarde
+      const pendingVars = variations.filter(v => v._pendingUrl);
+      if (pendingVars.length > 0) {
+        itemToSave._pendingVariations = pendingVars.map(v => ({ id: v.id, src: v._pendingUrl }));
+      }
+
       setIsSaving(true);
       await onSave(itemToSave);
       setIsSaving(false);
@@ -98,6 +134,21 @@ export default function ProductEditModal({
           setShowTagInput(false);
       }
       setSavingTag(false);
+  };
+
+  // --- VARIACIONES ---
+  const handleVariationTab = () => {
+    setActiveTab('variations');
+  };
+
+  const handleVarImageUpload = (varId, files) => {
+    if (!files?.length) return;
+    const file = files[0];
+    if (!file.type.startsWith('image/')) return alert("Solo imágenes");
+    onUploadImage([file], (url) => {
+      // Actualizar localmente para vista previa inmediata
+      setVariations(prev => prev.map(v => v.id === varId ? { ...v, image: { src: url }, _pendingUrl: url } : v));
+    });
   };
 
   // --- RENDERIZADO ---
@@ -128,6 +179,14 @@ export default function ProductEditModal({
                 >
                   <span style={{fontSize: '1.2rem'}}>🏷️</span> Clasificación (Categorías)
                 </button>
+                {isVariable && (
+                  <button 
+                    className={`cm-tab ${activeTab === 'variations' ? 'active' : ''}`}
+                    onClick={handleVariationTab}
+                  >
+                    <span style={{fontSize: '1.2rem'}}>🔀</span> Variaciones
+                  </button>
+                )}
             </div>
         </div>
         
@@ -634,6 +693,107 @@ export default function ProductEditModal({
                         </div>
 
                     </div>
+                </div>
+            )}
+
+            {/* --- PESTAÑA 3: VARIACIONES --- */}
+            {activeTab === 'variations' && (
+                <div key="tab-variations" className="cm-tab-content fade-in">
+                    {variationsLoading ? (
+                        <div style={{padding: '40px', textAlign: 'center', color: '#64748b'}}>
+                            <div style={{fontSize: '2rem', marginBottom: '10px'}}>⏳</div>
+                            Cargando variaciones...
+                        </div>
+                    ) : variations.length === 0 ? (
+                        <div style={{padding: '40px', textAlign: 'center', color: '#94a3b8'}}>
+                            <div style={{fontSize: '2rem', marginBottom: '10px'}}>📦</div>
+                            No se encontraron variaciones para este producto.
+                        </div>
+                    ) : (
+                        <div>
+                            <p style={{fontSize: '0.85rem', color: '#64748b', marginBottom: '16px'}}>
+                                Haz click en la imagen o en "📷 Cambiar" para asignar una foto a cada variación.
+                                Al presionar <strong>"Guardar Cambios"</strong> se sincronizará en todas las sedes.
+                            </p>
+                            <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
+                                {variations.map(v => {
+                                    const attrLabel = v.attributes.map(a => a.option).join(' / ') || `Variación #${v.id}`;
+                                    const imgSrc = v.image?.src || '';
+                                    const hasPending = !!v._pendingUrl;
+
+                                    return (
+                                        <div key={v.id} style={{
+                                            display: 'flex', alignItems: 'center', gap: '14px',
+                                            padding: '12px 14px', background: hasPending ? '#fffbeb' : '#f8fafc', borderRadius: '10px',
+                                            border: hasPending ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                                            transition: 'all 0.2s ease'
+                                        }}>
+                                            {/* Imagen */}
+                                            <div style={{
+                                                width: '72px', height: '72px', borderRadius: '8px', overflow: 'hidden',
+                                                background: '#e2e8f0', flexShrink: 0, cursor: 'pointer',
+                                                transition: 'transform 0.15s ease'
+                                            }}
+                                                onClick={() => document.getElementById(`var-upload-${v.id}`).click()}
+                                                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+                                                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                                            >
+                                                {imgSrc ? (
+                                                    <img src={imgSrc} alt={attrLabel} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                                                ) : (
+                                                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '1.6rem'}}>📷</div>
+                                                )}
+                                                <input
+                                                    id={`var-upload-${v.id}`}
+                                                    type="file" accept="image/*" style={{display: 'none'}}
+                                                    onChange={(e) => {
+                                                        if (e.target.files?.length) handleVarImageUpload(v.id, e.target.files);
+                                                        e.target.value = null;
+                                                    }}
+                                                />
+                                            </div>
+
+                                            {/* Info */}
+                                            <div style={{flex: 1, minWidth: 0}}>
+                                                <div style={{fontWeight: 600, fontSize: '0.95rem', color: '#1e293b'}}>
+                                                    {attrLabel}
+                                                </div>
+                                                <div style={{display: 'flex', gap: '10px', alignItems: 'center', marginTop: '3px'}}>
+                                                    {v.sku && <span style={{fontSize: '0.75rem', color: '#94a3b8'}}>SKU: {v.sku}</span>}
+                                                    {v.price && <span style={{fontSize: '0.82rem', color: '#059669', fontWeight: 500}}>
+                                                        ${Number(v.price).toLocaleString('es-CO')}
+                                                    </span>}
+                                                </div>
+                                                {hasPending && (
+                                                    <div style={{fontSize: '0.75rem', color: '#d97706', marginTop: '3px', fontWeight: 500}}>
+                                                        ● Imagen nueva — se guardará con "Guardar Cambios"
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Botón cambiar */}
+                                            <button
+                                                className="cm-btn cm-btn-secondary small"
+                                                onClick={() => document.getElementById(`var-upload-${v.id}`).click()}
+                                                style={{fontSize: '0.78rem', whiteSpace: 'nowrap', flexShrink: 0}}
+                                            >
+                                                📷 Cambiar
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            {variations.some(v => v._pendingUrl) && (
+                                <div style={{
+                                    marginTop: '14px', padding: '10px 14px', background: '#fef3c7',
+                                    borderRadius: '8px', fontSize: '0.82rem', color: '#92400e',
+                                    border: '1px solid #fde68a'
+                                }}>
+                                    ⚠️ Tienes {variations.filter(v => v._pendingUrl).length} imagen(es) pendiente(s). Presiona <strong>"Guardar Cambios"</strong> para aplicar.
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 

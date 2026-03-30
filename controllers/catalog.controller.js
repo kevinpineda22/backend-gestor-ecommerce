@@ -197,6 +197,29 @@ export async function getProductDetail(req, res) {
     }
 }
 
+export async function listVariations(req, res) {
+    try {
+        const { id } = req.params;
+        const result = await wooService.getProductVariations(id);
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+}
+
+export async function updateVariationImage(req, res) {
+    try {
+        const { id, varId } = req.params;
+        const { image } = req.body; // { src: "https://..." }
+        if (!image?.src) return res.status(400).json({ ok: false, message: "image.src requerido" });
+        const result = await catalogService.updateVariationImageInWoo(id, varId, image);
+        return res.json(result);
+    } catch (err) {
+        console.error("updateVariationImage error:", err);
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+}
+
 export async function createNewProduct(req, res) {
   try {
     const result = await catalogService.createProductInWoo(req.body);
@@ -239,6 +262,26 @@ export async function liveCompare(req, res) {
     return res.status(500).json({
       ok: false,
       message: "Error en comparación en vivo",
+      error: err.message
+    });
+  }
+}
+
+export async function priceDiffReport(req, res) {
+  try {
+    const { sede, page, productFilter } = req.query;
+    const result = await catalogService.getPriceDiffReportPage({
+      sede: sede || "PV001",
+      page: Number(page) || 1,
+      limit: 100,
+      productFilter: productFilter || 'all'
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error("priceDiffReport error:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Error generando reporte de diferencias",
       error: err.message
     });
   }

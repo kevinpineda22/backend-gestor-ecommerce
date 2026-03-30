@@ -1,4 +1,4 @@
-import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients } from "./woo.service.js";
+import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients, getProductVariations } from "./woo.service.js";
 import supabase from "../supabaseClient.js";
 import wooApi from "./woo.service.js";
 import { getLivePriceForItem } from "./siesa/siesa.prices.js";
@@ -422,6 +422,78 @@ export async function getCatalogPaginated({ page = 1, pageSize = 20, search = ""
     console.error("Error en getCatalogPaginated:", error);
     return { ok: false, message: "Error cargando catálogo", error };
   }
+}
+
+// ══════════════════════════════════════════════
+// Actualizar imagen de una VARIACIÓN (multi-sede)
+// ══════════════════════════════════════════════
+export async function updateVariationImageInWoo(parentWooId, variationId, imageData) {
+  // imageData: { src: "https://..." }
+  if (!parentWooId || !variationId) throw new Error("IDs requeridos");
+
+  const payload = { image: imageData };
+
+  // Obtener SKU del producto padre para buscarlo en otras sedes
+  const { data: prodRow } = await supabase
+    .from("ecommerce_products")
+    .select("item")
+    .eq("woo_product_id", parentWooId)
+    .maybeSingle();
+  const sku = prodRow?.item;
+
+  // Obtener atributos de la variación en PV001 para hacer match en otras sedes
+  const { data: allVars } = await getProductVariations(parentWooId);
+  const pvVariation = allVars.find(v => v.id === Number(variationId));
+  if (!pvVariation) throw new Error("Variación no encontrada en PV001");
+  const targetAttrs = pvVariation.attributes || [];
+
+  const allClients = await getAllSedeWooClients();
+  const sedeResults = [];
+
+  for (const [sedeCode, client] of allClients.entries()) {
+    try {
+      let parentId = sedeCode === "PV001" ? Number(parentWooId) : null;
+
+      if (!parentId && sku) {
+        const searchRes = await client.get("/products", { params: { sku } });
+        parentId = searchRes.data[0]?.id;
+      }
+      if (!parentId) {
+        sedeResults.push({ sede: sedeCode, ok: false, reason: "Producto no encontrado" });
+        continue;
+      }
+
+      let varId = sedeCode === "PV001" ? Number(variationId) : null;
+
+      if (!varId) {
+        // Encontrar la variación equivalente por atributos
+        const varsRes = await client.get(`/products/${parentId}/variations`, { params: { per_page: 100 } });
+        const match = varsRes.data.find(v =>
+          targetAttrs.every(ta => v.attributes?.some(va => va.name === ta.name && va.option === ta.option))
+        );
+        varId = match?.id;
+      }
+      if (!varId) {
+        sedeResults.push({ sede: sedeCode, ok: false, reason: "Variación no encontrada" });
+        continue;
+      }
+
+      await client.put(`/products/${parentId}/variations/${varId}`, payload);
+      sedeResults.push({ sede: sedeCode, ok: true });
+      console.log(`✅ Variación imagen actualizada en sede ${sedeCode} (parent=${parentId}, var=${varId})`);
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      console.error(`❌ Error variación imagen en sede ${sedeCode}:`, msg);
+      sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
+    }
+  }
+
+  const pvResult = sedeResults.find(r => r.sede === "PV001");
+  if (!pvResult?.ok) {
+    throw new Error("Error actualizando variación en PV001");
+  }
+
+  return { ok: true, sedeResults };
 }
 
 export async function updateProductInWoo(wooId, data) {
@@ -1293,6 +1365,162 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
   return {
     ok: true,
     total: count,
+    data: results
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE DE DIFERENCIAS DE PRECIOS (BULK) — Paginado, optimizado
+// productFilter: 'all' | 'simple' | 'variable'
+// ═══════════════════════════════════════════════════════════════
+export async function getPriceDiffReportPage({ sede, page = 1, limit = 100, productFilter = 'all' }) {
+  // 1. Sede → lista de precios
+  const { data: sedesData } = await supabase
+    .from("wc_sedes")
+    .select("codigo_siesa, lista_precio")
+    .eq("activa", true);
+
+  const sedeMap = {};
+  if (sedesData) {
+    sedesData.forEach(s => { sedeMap[s.codigo_siesa] = s.lista_precio; });
+  }
+  const lista = sedeMap[sede] ?? "GRAL";
+
+  // 2. Productos paginados — solo activos en ecommerce
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  const { data: products, error, count } = await supabase
+    .from("ecommerce_products")
+    .select("item, woo_product_id, woo_name", { count: 'exact' })
+    .eq("ecommerce_active", true)
+    .range(from, to);
+
+  if (error) throw new Error("Error leyendo ecommerce_products");
+
+  const totalPages = Math.ceil((count || 0) / limit);
+
+  if (!products || products.length === 0) {
+    return { ok: true, data: [], total: count || 0, page, totalPages };
+  }
+
+  // 3. WC batch prices (incluye type + variations)
+  const wooIds = products.map(p => p.woo_product_id);
+  const skus = products.map(p => p.item);
+
+  let wooDataMap = {};
+  let skuWooMap = {};
+  if (sede === "PV001" || !sede) {
+    wooDataMap = await getWooPricesByIds(wooIds);
+  } else {
+    skuWooMap = await getWooPricesBySkus(skus, sede);
+  }
+
+  // 4. Filtrar por tipo de producto DESPUÉS de traer los datos de WC
+  let filteredProducts = products;
+  if (productFilter === 'simple' || productFilter === 'variable') {
+    filteredProducts = products.filter(p => {
+      const wInfo = (sede === "PV001" || !sede) ? wooDataMap[p.woo_product_id] : skuWooMap[p.item];
+      const pType = wInfo?.type || 'simple';
+      return productFilter === 'variable' ? pType === 'variable' : pType !== 'variable';
+    });
+  }
+
+  // 5. SIESA prices — batches de 15 con stagger anti-429 (escalonado, no burst)
+  const BATCH = 15;
+  const STAGGER_MS = 80; // Cada request se escala: 0ms, 80ms, 160ms... evita burst
+  const results = [];
+
+  for (let i = 0; i < filteredProducts.length; i += BATCH) {
+    const batch = filteredProducts.slice(i, i + BATCH);
+
+    const batchResults = await Promise.all(
+      batch.map(async (p, idx) => {
+        // Escalonar: request 0 sale inmediato, request 1 a 80ms, request 2 a 160ms...
+        if (idx > 0) await new Promise(r => setTimeout(r, idx * STAGGER_MS));
+
+        const livePrice = await getLivePriceForItem({ item: p.item, sedeLista: lista }).catch((err) => {
+          console.warn(`⚠️ Precio fallido para ${p.item}: ${err.message}`);
+          return null;
+        });
+        const siesaPrice = livePrice && typeof livePrice.precio === "number" && livePrice.precio > 0
+          ? livePrice.precio : null;
+
+        const wInfo = (sede === "PV001" || !sede)
+          ? (wooDataMap[p.woo_product_id] || {})
+          : (skuWooMap[p.item] || {});
+        const wooPrice = wInfo.price ?? null;
+        const wooStock = wInfo.stock ?? null;
+        const pType = wInfo.type || 'simple';
+        const variations = wInfo.variations || [];
+
+        let status = "OK";
+        let diff = null;
+
+        if (!siesaPrice) {
+          status = "NO_SIESA";
+        } else if (wooPrice === null) {
+          status = "NO_WOO";
+        } else {
+          diff = siesaPrice - wooPrice;
+          if (diff !== 0) status = "DIFERENTE";
+        }
+
+        // Para productos variables: evaluar cada variación vs SIESA
+        const variationRows = variations.map(v => {
+          const vName = v.attributes?.map(a => a.option).join(', ') || v.sku || `#${v.id}`;
+          let vDiff = null;
+          let vStatus = "OK";
+          if (!siesaPrice) {
+            vStatus = "NO_SIESA";
+          } else {
+            vDiff = siesaPrice - (v.price || 0);
+            if (vDiff !== 0) vStatus = "DIFERENTE";
+          }
+          return {
+            id: v.id,
+            sku: v.sku || '',
+            name: vName,
+            woo_price: v.price,
+            diff: vDiff,
+            status: vStatus,
+            woo_stock: v.stock
+          };
+        });
+
+        // Para reporte "variable": un producto es diff si el padre O alguna variación difiere
+        const hasVarDiff = variationRows.some(vr => vr.status !== 'OK');
+
+        return {
+          item: p.item,
+          nombre: p.woo_name || '',
+          siesa_price: siesaPrice,
+          woo_price: wooPrice,
+          diff,
+          status,
+          unidad: livePrice?.unidad ?? null,
+          woo_stock: wooStock,
+          product_type: pType,
+          variations: variationRows,
+          _hasAnyDiff: status !== 'OK' || hasVarDiff
+        };
+      })
+    );
+
+    results.push(...batchResults);
+
+    // Pausa mínima entre batches — el stagger ya distribuye la carga
+    if (i + BATCH < filteredProducts.length) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
+  return {
+    ok: true,
+    total: count || 0,
+    page,
+    totalPages,
+    filteredCount: filteredProducts.length,
     data: results
   };
 }

@@ -413,6 +413,29 @@ export async function getProduct(id) {
   }
 }
 
+// --- VARIACIONES ---
+export async function getProductVariations(productId) {
+  try {
+    const response = await wooApi.get(`/products/${productId}/variations`, {
+      params: { per_page: 100 }
+    });
+    return { ok: true, data: response.data };
+  } catch (error) {
+    console.error("Error fetching variations:", error.message);
+    throw error;
+  }
+}
+
+export async function updateVariation(productId, variationId, data) {
+  try {
+    const response = await wooApi.put(`/products/${productId}/variations/${variationId}`, data);
+    return { ok: true, data: response.data };
+  } catch (error) {
+    console.error("Error updating variation:", error.message);
+    throw error;
+  }
+}
+
 // --- ETIQUETAS (TAGS) PARA MARCAS ---
 export async function getTags() {
   try {

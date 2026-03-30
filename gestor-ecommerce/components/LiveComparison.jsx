@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { fetchLiveComparison, adoptWooProducts, updateWooProduct } from "../services";
+import React, { useState, useEffect, useRef } from "react";
+import { fetchLiveComparison, adoptWooProducts, updateWooProduct, fetchPriceDiffReport } from "../services";
 import "../GestorEcommerce.css"; // Usa los estilos globales
 
 const CURRENCY = new Intl.NumberFormat("es-CO", {
@@ -21,6 +21,14 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
   // Sede actual viene del padre via sedeInfo.codigo_siesa
   const sede = sedeInfo?.codigo_siesa || "PV001";
 
+  // ── Report state ──
+  const [showReport, setShowReport] = useState(false);
+  const [reportData, setReportData] = useState([]);
+  const [reportScanning, setReportScanning] = useState(false);
+  const [reportProgress, setReportProgress] = useState({ processed: 0, total: 0, diffs: 0 });
+  const [reportFilter, setReportFilter] = useState('all'); // 'all' | 'simple' | 'variable'
+  const scanAbortRef = useRef(false);
+
   // Función pura para filtrar (sin llamar al server)
   const applyFilter = (rows, filter) => {
     if (filter === 'diff') return rows.filter(r => r.price_status !== 'OK');
@@ -29,13 +37,13 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
     return rows;
   };
 
-  const loadData = async () => {
+  const loadData = async (filterOverride) => {
     setLoading(true);
     try {
       const res = await fetchLiveComparison({ sede, page, item: search });
       if (res.ok) {
         setRawData(res.data);
-        setData(applyFilter(res.data, filterType));
+        setData(applyFilter(res.data, filterOverride ?? filterType));
         if (res.total) setTotalItemsDb(res.total);
       }
     } catch (error) {
@@ -71,8 +79,9 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
 
   const handleSearch = (e) => {
     e.preventDefault();
+    setFilterType('all');
     setPage(1);
-    loadData();
+    loadData('all');
   };
 
   const handleSyncRow = async (row) => {
@@ -112,6 +121,150 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
   // Los filtros se aplican localmente (instantáneo, sin re-fetch)
   const handleFilterClick = (type) => {
     setFilterType(type);
+  };
+
+  // ══════ REPORTE DE DIFERENCIAS ══════
+  const CONCURRENT_PAGES = 5; // Páginas en paralelo
+
+  const startReportScan = async () => {
+    setReportData([]);
+    setReportScanning(true);
+    scanAbortRef.current = false;
+    let currentPage = 1;
+    let allDiffs = [];
+    let processed = 0;
+    let totalItems = 0;
+    let lastKnownTotalPages = Infinity;
+
+    try {
+      while (currentPage <= lastKnownTotalPages) {
+        if (scanAbortRef.current) break;
+
+        // Calcular cuántas páginas solicitar en paralelo
+        const pagesToFetch = [];
+        for (let p = currentPage; p <= Math.min(currentPage + CONCURRENT_PAGES - 1, lastKnownTotalPages); p++) {
+          pagesToFetch.push(p);
+        }
+
+        // Fetch N páginas simultáneamente
+        const responses = await Promise.all(
+          pagesToFetch.map(p =>
+            fetchPriceDiffReport({ sede, page: p, productFilter: reportFilter })
+              .catch(() => ({ ok: false, data: [] }))
+          )
+        );
+
+        if (scanAbortRef.current) break;
+
+        for (const res of responses) {
+          if (!res.ok || !res.data || res.data.length === 0) continue;
+
+          if (totalItems === 0 && res.total) totalItems = res.total;
+          if (res.totalPages && res.totalPages < lastKnownTotalPages) {
+            lastKnownTotalPages = res.totalPages;
+          }
+
+          const diffs = res.data.filter(r => r._hasAnyDiff);
+          allDiffs = [...allDiffs, ...diffs];
+          processed += res.data.length;
+        }
+
+        setReportData([...allDiffs]);
+        setReportProgress({ processed, total: totalItems, diffs: allDiffs.length });
+
+        currentPage += pagesToFetch.length;
+
+        // Si ninguna respuesta trajo datos, terminar
+        if (responses.every(r => !r.ok || !r.data || r.data.length === 0)) break;
+      }
+    } catch (err) {
+      console.error('Report scan error:', err);
+    } finally {
+      setReportScanning(false);
+    }
+  };
+
+  const stopReportScan = () => {
+    scanAbortRef.current = true;
+  };
+
+  // ── Excel download via SheetJS CDN ──
+  const downloadReportExcel = async () => {
+    if (reportData.length === 0) return;
+    // Cargar SheetJS dinámicamente desde CDN
+    if (!window.XLSX) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      document.head.appendChild(script);
+      await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; });
+    }
+    const XLSX = window.XLSX;
+    const wb = XLSX.utils.book_new();
+
+    if (reportFilter === 'variable') {
+      // Hoja con variaciones expandidas
+      const rows = [];
+      for (const r of reportData) {
+        // Fila padre
+        rows.push({
+          'Item': r.item,
+          'Nombre': r.nombre,
+          'Tipo': 'VARIABLE',
+          'Variación': '',
+          'SKU Variación': '',
+          'Precio SIESA': r.siesa_price,
+          'Precio WooCommerce': r.woo_price,
+          'Diferencia': r.diff,
+          'Estado': r.status,
+          'Unidad': r.unidad || '',
+          'Stock WC': r.woo_stock
+        });
+        // Filas variación
+        for (const v of (r.variations || [])) {
+          rows.push({
+            'Item': r.item,
+            'Nombre': r.nombre,
+            'Tipo': 'Variación',
+            'Variación': v.name,
+            'SKU Variación': v.sku,
+            'Precio SIESA': r.siesa_price,
+            'Precio WooCommerce': v.woo_price,
+            'Diferencia': v.diff,
+            'Estado': v.status,
+            'Unidad': r.unidad || '',
+            'Stock WC': v.woo_stock
+          });
+        }
+      }
+      const ws = XLSX.utils.json_to_sheet(rows);
+      // Ancho de columnas
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 35 }, { wch: 10 }, { wch: 18 }, { wch: 14 },
+        { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 10 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, 'Variables con Diferencias');
+    } else {
+      // Hoja simple
+      const rows = reportData.map(r => ({
+        'Item': r.item,
+        'Nombre': r.nombre,
+        'Precio SIESA': r.siesa_price,
+        'Precio WooCommerce': r.woo_price,
+        'Diferencia': r.diff,
+        'Estado': r.status,
+        'Unidad': r.unidad || '',
+        'Stock WC': r.woo_stock
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 14 },
+        { wch: 12 }, { wch: 8 }, { wch: 10 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, 'Diferencias de Precios');
+    }
+
+    const filterLabel = reportFilter === 'variable' ? 'variables' : reportFilter === 'simple' ? 'simples' : 'todos';
+    XLSX.writeFile(wb, `reporte_diferencias_${sede}_${filterLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   return (
@@ -204,6 +357,15 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
             style={{ padding: '10px 20px', fontWeight: 600, boxShadow: syncing ? 'none' : '0 2px 8px rgba(139, 213, 0, 0.3)' }}
           >
             {syncing ? "⏳ Sincronizando..." : "📥 Importar de Woo"}
+          </button>
+
+          {/* Report button */}
+          <button
+            className="ge-btn"
+            onClick={() => { setShowReport(true); setReportData([]); setReportProgress({ processed: 0, total: 0, diffs: 0 }); setReportFilter('all'); }}
+            style={{ padding: '10px 20px', fontWeight: 600, background: '#4338ca', boxShadow: '0 2px 8px rgba(67, 56, 202, 0.3)' }}
+          >
+            📊 Reporte Diferencias
           </button>
         </div>
       </div>
@@ -458,6 +620,239 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
           Siguiente
         </button>
       </div>
+
+      {/* ══════ MODAL REPORTE DE DIFERENCIAS ══════ */}
+      {showReport && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '1100px',
+            maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.25)'
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '24px 28px 16px', borderBottom: '1px solid #e5e7eb',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#111827' }}>📊 Reporte de Diferencias de Precios</h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#6b7280' }}>
+                  Sede: <strong>{sedeInfo?.nombre || sede}</strong> — Solo productos activos en ecommerce
+                </p>
+              </div>
+              <button onClick={() => { setShowReport(false); stopReportScan(); }} style={{
+                background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#9ca3af', padding: '4px 8px'
+              }}>✕</button>
+            </div>
+
+            {/* Filter Tabs */}
+            <div style={{ padding: '12px 28px 0', background: '#f9fafb' }}>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {[
+                  { key: 'all', label: '📋 Todos los productos', desc: 'Simples + Variables' },
+                  { key: 'simple', label: '📦 Solo Simples', desc: 'Sin variaciones' },
+                  { key: 'variable', label: '🔀 Solo Variables', desc: 'Con variaciones' }
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => { if (!reportScanning) { setReportFilter(tab.key); setReportData([]); setReportProgress({ processed: 0, total: 0, diffs: 0 }); } }}
+                    disabled={reportScanning}
+                    style={{
+                      padding: '10px 18px', border: 'none', borderRadius: '8px 8px 0 0', cursor: reportScanning ? 'not-allowed' : 'pointer',
+                      background: reportFilter === tab.key ? '#fff' : 'transparent',
+                      borderBottom: reportFilter === tab.key ? '2px solid #4338ca' : '2px solid transparent',
+                      fontWeight: reportFilter === tab.key ? 700 : 500,
+                      color: reportFilter === tab.key ? '#4338ca' : '#6b7280',
+                      fontSize: '0.82rem', transition: 'all 0.15s',
+                      opacity: reportScanning && reportFilter !== tab.key ? 0.5 : 1
+                    }}
+                  >
+                    {tab.label}
+                    <div style={{ fontSize: '0.68rem', fontWeight: 400, marginTop: '1px' }}>{tab.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Progress + Actions */}
+            <div style={{ padding: '14px 28px', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                {!reportScanning ? (
+                  <button onClick={startReportScan} className="ge-btn" style={{
+                    padding: '10px 24px', fontWeight: 600, background: '#4338ca',
+                    boxShadow: '0 2px 8px rgba(67, 56, 202, 0.3)'
+                  }}>
+                    🔍 Iniciar Escaneo
+                  </button>
+                ) : (
+                  <button onClick={stopReportScan} style={{
+                    padding: '10px 24px', fontWeight: 600, background: '#dc2626', color: '#fff',
+                    border: 'none', borderRadius: '8px', cursor: 'pointer'
+                  }}>
+                    ⏹ Detener
+                  </button>
+                )}
+
+                {reportData.length > 0 && !reportScanning && (
+                  <button onClick={downloadReportExcel} className="ge-btn accent" style={{
+                    padding: '10px 24px', fontWeight: 600
+                  }}>
+                    📥 Descargar Excel ({reportData.length})
+                  </button>
+                )}
+
+                {reportProgress.total > 0 && (
+                  <div style={{ flex: 1, minWidth: '200px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#6b7280', marginBottom: '4px' }}>
+                      <span>{reportProgress.processed.toLocaleString()} / {reportProgress.total.toLocaleString()} procesados</span>
+                      <span style={{ color: '#dc2626', fontWeight: 600 }}>{reportProgress.diffs} diferencias</span>
+                    </div>
+                    <div style={{ background: '#e5e7eb', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.round((reportProgress.processed / reportProgress.total) * 100)}%`,
+                        height: '100%',
+                        background: reportScanning ? '#4338ca' : '#10b981',
+                        borderRadius: '999px',
+                        transition: 'width 0.3s ease'
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Results Table */}
+            <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
+              {reportData.length === 0 ? (
+                <div style={{ padding: '48px 28px', textAlign: 'center', color: '#9ca3af' }}>
+                  {reportScanning ? (
+                    <div>
+                      <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔄</div>
+                      <div>Escaneando productos{reportFilter === 'simple' ? ' simples' : reportFilter === 'variable' ? ' variables' : ''}...</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📋</div>
+                      <div>Selecciona un tipo de reporte y haz clic en "Iniciar Escaneo"</div>
+                      <div style={{ fontSize: '0.78rem', marginTop: '4px', color: '#9ca3af' }}>
+                        {reportFilter === 'simple' ? 'Solo productos simples (sin variaciones)' :
+                         reportFilter === 'variable' ? 'Solo productos con variaciones — incluye precio por variación' :
+                         'Todos los productos activos en ecommerce'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <table className="ge-table" style={{ fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1 }}>Item</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1 }}>Nombre</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'center' }}>Tipo</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'center' }}>Estado</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'right' }}>Precio SIESA</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'right' }}>Precio WC</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'right' }}>Diferencia</th>
+                      <th style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 1, textAlign: 'center' }}>Stock WC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportData.map((r) => (
+                      <React.Fragment key={r.item}>
+                        <tr>
+                          <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {r.item}
+                          </td>
+                          <td style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nombre}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: '0.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: '10px',
+                              background: r.product_type === 'variable' ? '#e0e7ff' : '#f3f4f6',
+                              color: r.product_type === 'variable' ? '#4338ca' : '#6b7280'
+                            }}>{r.product_type === 'variable' ? 'VARIABLE' : 'SIMPLE'}</span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: '0.72rem', fontWeight: 600, padding: '2px 8px', borderRadius: '10px',
+                              background: r.status === 'DIFERENTE' ? '#fef3c7' : r.status === 'NO_SIESA' ? '#fee2e2' : r.status === 'NO_WOO' ? '#e0e7ff' : '#d1fae5',
+                              color: r.status === 'DIFERENTE' ? '#d97706' : r.status === 'NO_SIESA' ? '#dc2626' : r.status === 'NO_WOO' ? '#4338ca' : '#059669'
+                            }}>{r.status}</span>
+                          </td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{r.siesa_price ? CURRENCY.format(r.siesa_price) : '—'}</td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{r.woo_price != null ? CURRENCY.format(r.woo_price) : '—'}</td>
+                          <td style={{
+                            textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap',
+                            color: r.diff > 0 ? '#dc2626' : r.diff < 0 ? '#059669' : '#111827'
+                          }}>
+                            {r.diff != null ? CURRENCY.format(r.diff) : '—'}
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 600, color: r.woo_stock > 0 ? '#059669' : '#dc2626' }}>
+                            {r.woo_stock ?? '—'}
+                          </td>
+                        </tr>
+                        {/* Variation sub-rows */}
+                        {r.variations && r.variations.length > 0 && r.variations.map(v => (
+                          <tr key={`${r.item}-v-${v.id}`} style={{ background: '#f8fafc' }}>
+                            <td style={{ paddingLeft: '24px', whiteSpace: 'nowrap' }}>
+                              <span style={{ color: '#94a3b8', marginRight: '4px' }}>↳</span>
+                              <span style={{ fontSize: '0.82rem', color: '#4338ca', fontWeight: 600 }}>{v.name}</span>
+                            </td>
+                            <td style={{ fontSize: '0.78rem', color: '#9ca3af' }}>SKU: {v.sku || '—'}</td>
+                            <td style={{ textAlign: 'center' }}>
+                              <span style={{ fontSize: '0.68rem', background: '#e0e7ff', color: '#4338ca', padding: '1px 6px', borderRadius: '8px' }}>Variación</span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <span style={{
+                                fontSize: '0.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: '10px',
+                                background: v.status === 'DIFERENTE' ? '#fef3c7' : v.status === 'NO_SIESA' ? '#fee2e2' : '#d1fae5',
+                                color: v.status === 'DIFERENTE' ? '#d97706' : v.status === 'NO_SIESA' ? '#dc2626' : '#059669'
+                              }}>{v.status}</span>
+                            </td>
+                            <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: '0.82rem' }}>{r.siesa_price ? CURRENCY.format(r.siesa_price) : '—'}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 600, color: '#4338ca', fontSize: '0.82rem' }}>
+                              {v.woo_price != null ? CURRENCY.format(v.woo_price) : '—'}
+                            </td>
+                            <td style={{
+                              textAlign: 'right', fontWeight: 600, fontSize: '0.82rem',
+                              color: v.diff > 0 ? '#dc2626' : v.diff < 0 ? '#059669' : '#111827'
+                            }}>
+                              {v.diff != null ? CURRENCY.format(v.diff) : '—'}
+                            </td>
+                            <td style={{ textAlign: 'center', fontWeight: 600, fontSize: '0.82rem', color: v.woo_stock > 0 ? '#059669' : '#dc2626' }}>
+                              {v.woo_stock ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            {reportData.length > 0 && !reportScanning && (
+              <div style={{
+                padding: '12px 28px', borderTop: '1px solid #e5e7eb', background: '#f9fafb',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', color: '#6b7280',
+                borderRadius: '0 0 16px 16px'
+              }}>
+                <span>
+                  Escaneo completado: <strong>{reportProgress.processed.toLocaleString()}</strong> productos —{' '}
+                  <strong style={{ color: '#dc2626' }}>{reportData.length}</strong> con diferencias
+                  {reportFilter !== 'all' && <span> ({reportFilter === 'variable' ? 'solo variables' : 'solo simples'})</span>}
+                </span>
+                <span>{new Date().toLocaleString('es-CO')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
