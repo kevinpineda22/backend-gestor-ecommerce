@@ -100,3 +100,61 @@ export async function getLivePriceForItem({ item, sedeLista }) {
   setCachedPrice(cacheKey, result);
   return result;
 }
+
+/**
+ * Retorna TODOS los precios de un item agrupados por unidad.
+ * Para cada unidad, aplica la misma lógica de prioridad (lista sede → general → reciente).
+ * Retorna: { UND: { unidad, precio, lista }, P48: { ... }, ... }
+ */
+export async function getAllPricesForItem({ item, sedeLista }) {
+  const cacheKey = `ALL_${item}_${sedeLista}`;
+  const cached = getCachedPrice(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const rows = await executeSiesaQuery({
+    descripcion: DESC_PRECIOS,
+    parametros: `f120_id=${item}`
+  });
+
+  if (!rows || rows.length === 0) {
+    setCachedPrice(cacheKey, {});
+    return {};
+  }
+
+  const targetNum = normalizeList(sedeLista);
+
+  const candidates = rows
+    .filter(r => Number(r.f126_id_cia ?? 1) === 1)
+    .map(r => ({
+      lista: r.f126_id_lista_precio,
+      unidad: String(r.f126_id_unidad_medida).trim(),
+      precio: Number(r.f126_precio),
+      fecha: r.f126_fecha_ts_actualizacion || r.f126_fecha_ts_creacion
+    }))
+    .filter(r => r.precio > 0);
+
+  // Agrupar por unidad
+  const byUnit = {};
+  for (const c of candidates) {
+    if (!byUnit[c.unidad]) byUnit[c.unidad] = [];
+    byUnit[c.unidad].push(c);
+  }
+
+  // Para cada unidad, elegir el mejor precio (misma lógica de prioridad)
+  const result = {};
+  for (const [unit, unitCandidates] of Object.entries(byUnit)) {
+    unitCandidates.sort((a, b) => {
+      const la = normalizeList(a.lista);
+      const lb = normalizeList(b.lista);
+      if (la === targetNum && lb !== targetNum) return -1;
+      if (lb === targetNum && la !== targetNum) return 1;
+      if (la === 0 && lb !== 0) return -1;
+      if (lb === 0 && la !== 0) return 1;
+      return String(b.fecha).localeCompare(String(a.fecha));
+    });
+    result[unit] = unitCandidates[0];
+  }
+
+  setCachedPrice(cacheKey, result);
+  return result;
+}

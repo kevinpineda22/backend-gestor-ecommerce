@@ -13,15 +13,15 @@ export async function uploadImageToSupabase(file) {
     }
 
     const nameWithoutExt = file.originalname.substring(0, file.originalname.lastIndexOf('.'));
-    const cleanName = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '');
-    const fileName = `${Date.now()}_${cleanName}.${fileExt}`;
+    const cleanName = nameWithoutExt.replace(/[^a-zA-Z0-9_\-]/g, '').toLowerCase() || `imagen-${Date.now()}`;
+    const fileName = `${cleanName}.${fileExt}`;
     
     // 1. Intentar subir
     const { data, error } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(fileName, file.buffer, {
         contentType: file.mimetype,
-        upsert: false
+        upsert: true
       });
 
     // Si error es "Bucket not found", intentar crearlo (aunque RLS puede impedirlo)

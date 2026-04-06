@@ -26,7 +26,19 @@ export default function ProductEditModal({
   const [newTagName, setNewTagName] = useState("");
   const [savingTag, setSavingTag] = useState(false);
   const [isSaving, setIsSaving] = useState(false); // Para el botón de guardar global
-  
+
+  // Estados para el panel de redimensionado
+  const [pendingFile, setPendingFile] = useState(null);
+  const [showResizePanel, setShowResizePanel] = useState(false);
+  const [resizeEnabled, setResizeEnabled] = useState(true);
+  const [resizeWidth, setResizeWidth] = useState(800);
+  const [resizeHeight, setResizeHeight] = useState(800);
+  const [resizeQuality, setResizeQuality] = useState(0.85);
+  const [resizeFormat, setResizeFormat] = useState('webp');
+  const [resizeBgColor, setResizeBgColor] = useState('#FFFFFF');
+  const [resizePreviewUrl, setResizePreviewUrl] = useState(null);
+  const [resizeName, setResizeName] = useState('');
+
   // Estado para URL Manual (Input controlado)
   const [manualUrl, setManualUrl] = useState("");
 
@@ -37,6 +49,7 @@ export default function ProductEditModal({
 
   // Ref para saber si es la primera vez que se abre (evita reset de tab al enriquecer con Woo)
   const prevProductId = useRef(null);
+  const pendingCallbackRef = useRef(null);
 
   // Inicializar estado local al abrir
   useEffect(() => {
@@ -89,6 +102,77 @@ export default function ProductEditModal({
         .finally(() => { setVariationsLoading(false); setVariationsLoaded(true); });
     }
   }, [isVariable, localItem?.woo_product_id]);
+
+  // ── UTILIDAD: redimensionar imagen con canvas (lógica igual a ConversorImagenes) ──
+  const resizeImageFile = (file, w, h, q, fmt, bg) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+        const scale = Math.min(w / img.width, h / img.height);
+        const sw = img.width * scale;
+        const sh = img.height * scale;
+        ctx.drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh);
+        const mime = fmt === 'webp' ? 'image/webp' : fmt === 'png' ? 'image/png' : 'image/jpeg';
+        canvas.toBlob(blob => {
+          URL.revokeObjectURL(objectUrl);
+          if (blob) resolve(blob);
+          else reject(new Error('Error al convertir'));
+        }, mime, q);
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Error cargando imagen')); };
+      img.src = objectUrl;
+    });
+  };
+
+  // Intercepta cualquier selección de archivo y abre el panel de resize
+  // suggestedName (opcional): nombre base pre-llenado en lugar del nombre del archivo
+  const handleFileSelected = (file, callback, suggestedName) => {
+    if (!file.type.startsWith('image/')) return alert("Solo imágenes");
+    setPendingFile(file);
+    pendingCallbackRef.current = callback;
+    const url = URL.createObjectURL(file);
+    setResizePreviewUrl(url);
+    setResizeName(suggestedName || file.name.replace(/\.[^.]+$/, ''));
+    setShowResizePanel(true);
+  };
+
+  const closeResizePanel = () => {
+    setShowResizePanel(false);
+    setPendingFile(null);
+    if (resizePreviewUrl) { URL.revokeObjectURL(resizePreviewUrl); }
+    setResizePreviewUrl(null);
+    setResizeName('');
+    pendingCallbackRef.current = null;
+  };
+
+  const confirmUpload = async () => {
+    if (!pendingFile) return;
+    const finalName = (resizeName.trim().replace(/\s+/g, '-') || pendingFile.name.replace(/\.[^.]+$/, ''));
+    let fileToUpload = pendingFile;
+    if (resizeEnabled) {
+      try {
+        const blob = await resizeImageFile(pendingFile, resizeWidth, resizeHeight, resizeQuality, resizeFormat, resizeBgColor);
+        fileToUpload = new File([blob], `${finalName}.${resizeFormat}`, { type: blob.type });
+      } catch (err) {
+        alert("Error al redimensionar: " + err.message);
+        return;
+      }
+    } else {
+      const ext = pendingFile.name.match(/\.[^.]+$/)?.[0] || '';
+      if (finalName + ext !== pendingFile.name) {
+        fileToUpload = new File([pendingFile], `${finalName}${ext}`, { type: pendingFile.type });
+      }
+    }
+    onUploadImage([fileToUpload], pendingCallbackRef.current);
+    closeResizePanel();
+  };
 
   if (!localItem) return null;
 
@@ -144,11 +228,12 @@ export default function ProductEditModal({
   const handleVarImageUpload = (varId, files) => {
     if (!files?.length) return;
     const file = files[0];
-    if (!file.type.startsWith('image/')) return alert("Solo imágenes");
-    onUploadImage([file], (url) => {
-      // Actualizar localmente para vista previa inmediata
+    // Usar el SKU propio de la variación como nombre sugerido
+    const variation = variations.find(v => v.id === varId);
+    const suggestedName = (variation?.sku || '').toLowerCase().replace(/\s+/g, '-') || String(varId);
+    handleFileSelected(file, (url) => {
       setVariations(prev => prev.map(v => v.id === varId ? { ...v, image: { src: url }, _pendingUrl: url } : v));
-    });
+    }, suggestedName);
   };
 
   // --- RENDERIZADO ---
@@ -323,9 +408,10 @@ export default function ProductEditModal({
                                     onDrop={(e) => {
                                         e.preventDefault();
                                         e.currentTarget.style.backgroundColor = '#f8fafc';
-                                        onUploadImage(e.dataTransfer.files, (url) => {
+                                        const file = e.dataTransfer.files?.[0];
+                                        if (file) handleFileSelected(file, (url) => {
                                             setLocalItem(prev => ({...prev, images: [...(prev.images || []), url] }));
-                                        });
+                                        }, (localItem?.item || '').toLowerCase());
                                     }}     
                                     onClick={() => document.getElementById('file-upload-modal').click()}  
                                 >
@@ -339,12 +425,12 @@ export default function ProductEditModal({
                                         accept="image/*" 
                                         style={{display: 'none'}} 
                                         onChange={(e) => {
-                                            if(e.target.files && e.target.files.length > 0) {
-                                                onUploadImage(e.target.files, (url) => {
+                                            if (e.target.files?.[0]) {
+                                                const file = e.target.files[0];
+                                                e.target.value = null;
+                                                handleFileSelected(file, (url) => {
                                                     setLocalItem(prev => ({...prev, images: [...(prev.images || []), url] }));
-                                                    // Reset input para permitir subir misma imagen si se borró
-                                                    e.target.value = null; 
-                                                });
+                                                }, (localItem?.item || '').toLowerCase());
                                             }
                                         }}
                                         onClick={(e) => e.stopPropagation()} 
@@ -712,7 +798,7 @@ export default function ProductEditModal({
                     ) : (
                         <div>
                             <p style={{fontSize: '0.85rem', color: '#64748b', marginBottom: '16px'}}>
-                                Haz click en la imagen o en "📷 Cambiar" para asignar una foto a cada variación.
+                                Click en la imagen, en "📷 Cambiar" o <strong>arrastra una imagen</strong> encima de la variación.
                                 Al presionar <strong>"Guardar Cambios"</strong> se sincronizará en todas las sedes.
                             </p>
                             <div style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
@@ -722,26 +808,25 @@ export default function ProductEditModal({
                                     const hasPending = !!v._pendingUrl;
 
                                     return (
-                                        <div key={v.id} style={{
-                                            display: 'flex', alignItems: 'center', gap: '14px',
-                                            padding: '12px 14px', background: hasPending ? '#fffbeb' : '#f8fafc', borderRadius: '10px',
-                                            border: hasPending ? '2px solid #f59e0b' : '1px solid #e2e8f0',
-                                            transition: 'all 0.2s ease'
-                                        }}>
-                                            {/* Imagen */}
-                                            <div style={{
-                                                width: '72px', height: '72px', borderRadius: '8px', overflow: 'hidden',
-                                                background: '#e2e8f0', flexShrink: 0, cursor: 'pointer',
-                                                transition: 'transform 0.15s ease'
+                                        <div key={v.id}
+                                            className={`cm-var-row${hasPending ? ' pending' : ''}`}
+                                            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
+                                            onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
+                                            onDrop={(e) => {
+                                                e.preventDefault();
+                                                e.currentTarget.classList.remove('drag-over');
+                                                const file = e.dataTransfer.files?.[0];
+                                                if (file) handleVarImageUpload(v.id, [file]);
                                             }}
+                                        >
+                                            {/* Imagen */}
+                                            <div className="cm-var-img-wrap"
                                                 onClick={() => document.getElementById(`var-upload-${v.id}`).click()}
-                                                onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
                                             >
                                                 {imgSrc ? (
                                                     <img src={imgSrc} alt={attrLabel} style={{width: '100%', height: '100%', objectFit: 'cover'}} />
                                                 ) : (
-                                                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '1.6rem'}}>📷</div>
+                                                    <div className="cm-var-img-empty">📷</div>
                                                 )}
                                                 <input
                                                     id={`var-upload-${v.id}`}
@@ -769,6 +854,9 @@ export default function ProductEditModal({
                                                         ● Imagen nueva — se guardará con "Guardar Cambios"
                                                     </div>
                                                 )}
+                                                <div style={{fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px'}}>
+                                                    🖱 Click o arrastra aquí
+                                                </div>
                                             </div>
 
                                             {/* Botón cambiar */}
@@ -798,6 +886,103 @@ export default function ProductEditModal({
             )}
 
         </div>
+
+        {/* PANEL DE REDIMENSIONADO */}
+        {showResizePanel && (
+          <div className="cm-resize-overlay">
+            <div className="cm-resize-panel">
+              <div className="cm-resize-panel-header">
+                <h4>📐 Ajustar imagen antes de subir</h4>
+                <button className="cm-close-btn" onClick={closeResizePanel}>×</button>
+              </div>
+              <div className="cm-resize-panel-body">
+                <div className="cm-resize-preview-col">
+                  {resizePreviewUrl && (
+                    <img src={resizePreviewUrl} alt="preview" className="cm-resize-preview-img" />
+                  )}
+                  <p className="cm-resize-preview-size">
+                    {pendingFile
+                      ? pendingFile.size < 1048576
+                        ? `${(pendingFile.size / 1024).toFixed(1)} KB`
+                        : `${(pendingFile.size / 1048576).toFixed(1)} MB`
+                      : ''}
+                  </p>
+                  <div className="cm-resize-name-group">
+                    <label>Nombre del archivo</label>
+                    <div className="cm-resize-name-row">
+                      <input
+                        type="text"
+                        className="cm-input"
+                        value={resizeName}
+                        onChange={(e) => setResizeName(e.target.value)}
+                        placeholder="nombre-imagen"
+                        style={{fontSize: '0.8rem'}}
+                      />
+                      <span className="cm-resize-ext">.{resizeEnabled ? resizeFormat : (pendingFile?.name.match(/\.[^.]+$/)?.[0]?.slice(1) || 'img')}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="cm-resize-options-col">
+                  <div className="cm-resize-toggle-row">
+                    <label className="cm-resize-radio">
+                      <input type="radio" checked={resizeEnabled} onChange={() => setResizeEnabled(true)} />
+                      Redimensionar imagen
+                    </label>
+                    <label className="cm-resize-radio">
+                      <input type="radio" checked={!resizeEnabled} onChange={() => setResizeEnabled(false)} />
+                      Subir sin cambios
+                    </label>
+                  </div>
+                  {resizeEnabled && (
+                    <div className="cm-resize-fields">
+                      <div className="cm-resize-row">
+                        <div className="cm-resize-field">
+                          <label>Ancho (px)</label>
+                          <input type="number" value={resizeWidth} min={1} max={4096}
+                            className="cm-input" onChange={(e) => setResizeWidth(+e.target.value || 800)} />
+                        </div>
+                        <div className="cm-resize-field">
+                          <label>Alto (px)</label>
+                          <input type="number" value={resizeHeight} min={1} max={4096}
+                            className="cm-input" onChange={(e) => setResizeHeight(+e.target.value || 800)} />
+                        </div>
+                      </div>
+                      <div className="cm-resize-row">
+                        <div className="cm-resize-field">
+                          <label>Formato</label>
+                          <select value={resizeFormat} onChange={(e) => setResizeFormat(e.target.value)} className="cm-input">
+                            <option value="webp">WebP</option>
+                            <option value="jpeg">JPEG</option>
+                            <option value="png">PNG</option>
+                          </select>
+                        </div>
+                        <div className="cm-resize-field">
+                          <label>Calidad ({Math.round(resizeQuality * 100)}%)</label>
+                          <input type="range" min={0.1} max={1} step={0.05} value={resizeQuality}
+                            onChange={(e) => setResizeQuality(+e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="cm-resize-row">
+                        <div className="cm-resize-field">
+                          <label>Color de fondo</label>
+                          <input type="color" value={resizeBgColor} onChange={(e) => setResizeBgColor(e.target.value)} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="cm-resize-panel-footer">
+                <button className="cm-btn cm-btn-secondary" onClick={closeResizePanel}>Cancelar</button>
+                <button className="cm-btn cm-btn-primary" onClick={confirmUpload}>
+                  {resizeEnabled
+                    ? `⬆ Redimensionar y subir (${resizeWidth}×${resizeHeight} ${resizeFormat.toUpperCase()})`
+                    : '⬆ Subir imagen original'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* FOOTER */}
         <div className="cm-modal-footer">

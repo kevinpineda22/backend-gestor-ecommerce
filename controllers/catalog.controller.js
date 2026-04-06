@@ -220,6 +220,19 @@ export async function updateVariationImage(req, res) {
     }
 }
 
+export async function syncVariationPrice(req, res) {
+    try {
+        const { id, varId } = req.params;
+        const { price } = req.body;
+        if (price === undefined || price === null) return res.status(400).json({ ok: false, message: "price requerido" });
+        const result = await catalogService.syncVariationPriceInWoo(id, varId, price);
+        return res.json(result);
+    } catch (err) {
+        console.error("syncVariationPrice error:", err);
+        return res.status(500).json({ ok: false, message: err.message });
+    }
+}
+
 export async function createNewProduct(req, res) {
   try {
     const result = await catalogService.createProductInWoo(req.body);

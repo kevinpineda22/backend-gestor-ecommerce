@@ -759,3 +759,223 @@
     cursor: not-allowed;
     transform: none;
 }
+
+/* ── PANEL DE REDIMENSIONADO ── */
+.cm-resize-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(4px);
+    animation: cmSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cm-resize-panel {
+    background: #fff;
+    border-radius: 14px;
+    width: 90%;
+    max-width: 620px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.cm-resize-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.cm-resize-panel-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.cm-resize-panel-body {
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    gap: 20px;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.cm-resize-preview-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.cm-resize-preview-img {
+    width: 150px;
+    height: 150px;
+    object-fit: contain;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #f1f5f9;
+}
+
+.cm-resize-preview-label {
+    font-size: 0.73rem;
+    color: #64748b;
+    text-align: center;
+    word-break: break-all;
+    margin: 0;
+}
+
+.cm-resize-preview-size {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin: 0;
+}
+
+.cm-resize-options-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.cm-resize-toggle-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.cm-resize-radio {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.88rem;
+    color: #334155;
+    cursor: pointer;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1.5px solid #e2e8f0;
+    transition: all 0.15s;
+    flex: 1;
+    min-width: 130px;
+}
+
+.cm-resize-radio:has(input:checked) {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 500;
+}
+
+.cm-resize-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cm-resize-row {
+    display: flex;
+    gap: 12px;
+}
+
+.cm-resize-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cm-resize-field label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #475569;
+}
+
+.cm-resize-panel-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+/* Rename field inside resize panel */
+.cm-resize-name-group {
+    width: 100%;
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cm-resize-name-group label {
+    font-size: 0.73rem;
+    font-weight: 500;
+    color: #475569;
+}
+
+.cm-resize-name-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.cm-resize-ext {
+    font-size: 0.78rem;
+    color: #64748b;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+/* Variation rows */
+.cm-var-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border-radius: 10px;
+    border: 1.5px solid #e2e8f0;
+    transition: all 0.2s ease;
+}
+
+.cm-var-row.pending {
+    background: #fffbeb;
+    border-color: #f59e0b;
+}
+
+.cm-var-row.drag-over {
+    background: #eff6ff;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.cm-var-img-wrap {
+    width: 72px;
+    height: 72px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #e2e8f0;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.cm-var-img-wrap:hover {
+    transform: scale(1.05);
+}
+
+.cm-var-img-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #94a3b8;
+    font-size: 1.6rem;
+}

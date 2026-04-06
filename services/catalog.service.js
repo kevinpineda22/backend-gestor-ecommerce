@@ -1,7 +1,7 @@
 import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients, getProductVariations } from "./woo.service.js";
 import supabase from "../supabaseClient.js";
 import wooApi from "./woo.service.js";
-import { getLivePriceForItem } from "./siesa/siesa.prices.js";
+import { getLivePriceForItem, getAllPricesForItem } from "./siesa/siesa.prices.js";
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
 
 export async function getCatalogStats() {
@@ -484,6 +484,76 @@ export async function updateVariationImageInWoo(parentWooId, variationId, imageD
     } catch (error) {
       const msg = error.response?.data?.message || error.message;
       console.error(`❌ Error variación imagen en sede ${sedeCode}:`, msg);
+      sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
+    }
+  }
+
+  const pvResult = sedeResults.find(r => r.sede === "PV001");
+  if (!pvResult?.ok) {
+    throw new Error("Error actualizando variación en PV001");
+  }
+
+  return { ok: true, sedeResults };
+}
+
+/**
+ * Sincronizar precio de una variación en WooCommerce (multi-sede)
+ */
+export async function syncVariationPriceInWoo(parentWooId, variationId, price) {
+  if (!parentWooId || !variationId || price === undefined) throw new Error("Parámetros requeridos");
+
+  const payload = { regular_price: String(price) };
+
+  // Obtener SKU del producto padre para buscarlo en otras sedes
+  const { data: prodRow } = await supabase
+    .from("ecommerce_products")
+    .select("item")
+    .eq("woo_product_id", parentWooId)
+    .maybeSingle();
+  const sku = prodRow?.item;
+
+  // Obtener atributos de la variación en PV001 para hacer match en otras sedes
+  const { data: allVars } = await getProductVariations(parentWooId);
+  const pvVariation = allVars.find(v => v.id === Number(variationId));
+  if (!pvVariation) throw new Error("Variación no encontrada en PV001");
+  const targetAttrs = pvVariation.attributes || [];
+
+  const allClients = await getAllSedeWooClients();
+  const sedeResults = [];
+
+  for (const [sedeCode, client] of allClients.entries()) {
+    try {
+      let parentId = sedeCode === "PV001" ? Number(parentWooId) : null;
+
+      if (!parentId && sku) {
+        const searchRes = await client.get("/products", { params: { sku } });
+        parentId = searchRes.data[0]?.id;
+      }
+      if (!parentId) {
+        sedeResults.push({ sede: sedeCode, ok: false, reason: "Producto no encontrado" });
+        continue;
+      }
+
+      let varId = sedeCode === "PV001" ? Number(variationId) : null;
+
+      if (!varId) {
+        const varsRes = await client.get(`/products/${parentId}/variations`, { params: { per_page: 100 } });
+        const match = varsRes.data.find(v =>
+          targetAttrs.every(ta => v.attributes?.some(va => va.name === ta.name && va.option === ta.option))
+        );
+        varId = match?.id;
+      }
+      if (!varId) {
+        sedeResults.push({ sede: sedeCode, ok: false, reason: "Variación no encontrada" });
+        continue;
+      }
+
+      await client.put(`/products/${parentId}/variations/${varId}`, payload);
+      sedeResults.push({ sede: sedeCode, ok: true });
+      console.log(`✅ Variación precio actualizado en sede ${sedeCode} (parent=${parentId}, var=${varId}, price=${price})`);
+    } catch (error) {
+      const msg = error.response?.data?.message || error.message;
+      console.error(`❌ Error variación precio en sede ${sedeCode}:`, msg);
       sedeResults.push({ sede: sedeCode, ok: false, reason: msg });
     }
   }
@@ -1281,12 +1351,32 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
     // Procesar este lote en paralelo
     const batchResults = await Promise.all(
       batch.map(async (p) => {
-        // Fetch en paralelo Siesa Precio + Stock
-        const [livePrice, stock] = await Promise.all([
+        // Para PV001: buscar por woo_product_id. Para otras sedes: buscar por SKU
+        let wooInfo;
+        let sedeWooProductId = p.woo_product_id;
+        if (sede === "PV001" || !sede) {
+          wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null, type: 'simple', variations: [] };
+        } else {
+          const skuInfo = skuWooMap[p.item] || { price: null, stock: null, woo_product_id: null, type: 'simple', variations: [] };
+          wooInfo = skuInfo;
+          if (skuInfo.woo_product_id) sedeWooProductId = skuInfo.woo_product_id;
+        }
+        const productType = wooInfo.type || 'simple';
+        const variations = wooInfo.variations || [];
+        const isVariable = productType === 'variable' && variations.length > 0;
+
+        // Fetch en paralelo: Siesa Precio(s) + Stock
+        const [livePrice, allPrices, stock] = await Promise.all([
           getLivePriceForItem({ item: p.item, sedeLista: lista }).catch((e) => {
              console.error(`❌ Error precio ${p.item}:`, e.message);
              return null;
           }),
+          isVariable
+            ? getAllPricesForItem({ item: p.item, sedeLista: lista }).catch((e) => {
+                console.error(`❌ Error allPrices ${p.item}:`, e.message);
+                return {};
+              })
+            : Promise.resolve({}),
           getLiveStockForItem({ item: p.item, sede }).catch((e) => {
              console.error(`❌ Error stock ${p.item}:`, e.message);
              return null;
@@ -1298,20 +1388,8 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
             ? livePrice.precio
             : null;
 
-        // Para PV001: buscar por woo_product_id. Para otras sedes: buscar por SKU
-        let wooInfo;
-        let sedeWooProductId = p.woo_product_id;
-        if (sede === "PV001" || !sede) {
-          wooInfo = wooDataMap[p.woo_product_id] || { price: null, stock: null, type: 'simple', variations: [] };
-        } else {
-          const skuInfo = skuWooMap[p.item] || { price: null, stock: null, woo_product_id: null, type: 'simple', variations: [] };
-          wooInfo = skuInfo;
-          if (skuInfo.woo_product_id) sedeWooProductId = skuInfo.woo_product_id;
-        }
         const wooPrice = wooInfo.price;
         const wooStock = wooInfo.stock;
-        const productType = wooInfo.type || 'simple';
-        const variations = wooInfo.variations || [];
 
         let priceStatus = "OK";
         let priceDiff = null;
@@ -1327,6 +1405,44 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
           }
         }
 
+        // Mapear variaciones con su precio SIESA correspondiente
+        const variationRows = variations.map(v => {
+          const varName = v.attributes?.map(a => a.option).join(', ') || v.sku || `#${v.id}`;
+          // Extraer unidad del SKU: "10550P48" → "P48", "10550UND" → "UND"
+          const varUnit = v.sku ? v.sku.replace(p.item, '').trim() : null;
+          const unitPrice = varUnit && allPrices[varUnit] ? allPrices[varUnit] : null;
+          const varSiesaPrice = unitPrice?.precio ?? null;
+
+          let varStatus = "OK";
+          let varDiff = null;
+          if (!varSiesaPrice) {
+            varStatus = "NO_SIESA";
+          } else if (v.price === null || v.price === undefined) {
+            varStatus = "NO_WOO";
+          } else {
+            varDiff = varSiesaPrice - v.price;
+            if (varDiff !== 0) varStatus = "DIFERENTE";
+          }
+
+          return {
+            id: v.id,
+            sku: v.sku || '',
+            name: varName,
+            price: v.price,
+            stock: v.stock,
+            siesa_price: varSiesaPrice,
+            siesa_unit: varUnit || null,
+            price_diff: varDiff,
+            price_status: varStatus
+          };
+        });
+
+        // Para variable: el status general incluye variaciones
+        const hasVarDiff = variationRows.some(vr => vr.price_status !== 'OK');
+        if (isVariable && hasVarDiff && priceStatus === 'OK') {
+          priceStatus = 'DIFERENTE';
+        }
+
         return {
           item: p.item,
           woo_product_id: p.woo_product_id,
@@ -1340,16 +1456,7 @@ export async function getLiveComparison({ sede, page = 1, limit = 20, item }) {
           stock_existencia: stock?.existencia ?? 0,
           stock_comprometido: stock?.pos ?? 0,
           product_type: productType,
-          variations: variations.map(v => {
-            const varName = v.attributes?.map(a => a.option).join(', ') || v.sku || `#${v.id}`;
-            return {
-              id: v.id,
-              sku: v.sku || '',
-              name: varName,
-              price: v.price,
-              stock: v.stock
-            };
-          })
+          variations: variationRows
         };
       })
     );
@@ -1439,20 +1546,28 @@ export async function getPriceDiffReportPage({ sede, page = 1, limit = 100, prod
         // Escalonar: request 0 sale inmediato, request 1 a 80ms, request 2 a 160ms...
         if (idx > 0) await new Promise(r => setTimeout(r, idx * STAGGER_MS));
 
-        const livePrice = await getLivePriceForItem({ item: p.item, sedeLista: lista }).catch((err) => {
-          console.warn(`⚠️ Precio fallido para ${p.item}: ${err.message}`);
-          return null;
-        });
-        const siesaPrice = livePrice && typeof livePrice.precio === "number" && livePrice.precio > 0
-          ? livePrice.precio : null;
-
         const wInfo = (sede === "PV001" || !sede)
           ? (wooDataMap[p.woo_product_id] || {})
           : (skuWooMap[p.item] || {});
-        const wooPrice = wInfo.price ?? null;
-        const wooStock = wInfo.stock ?? null;
         const pType = wInfo.type || 'simple';
         const variations = wInfo.variations || [];
+        const isVariable = pType === 'variable' && variations.length > 0;
+
+        const [livePrice, allPrices] = await Promise.all([
+          getLivePriceForItem({ item: p.item, sedeLista: lista }).catch((err) => {
+            console.warn(`⚠️ Precio fallido para ${p.item}: ${err.message}`);
+            return null;
+          }),
+          isVariable
+            ? getAllPricesForItem({ item: p.item, sedeLista: lista }).catch(() => ({}))
+            : Promise.resolve({})
+        ]);
+
+        const siesaPrice = livePrice && typeof livePrice.precio === "number" && livePrice.precio > 0
+          ? livePrice.precio : null;
+
+        const wooPrice = wInfo.price ?? null;
+        const wooStock = wInfo.stock ?? null;
 
         let status = "OK";
         let diff = null;
@@ -1466,15 +1581,19 @@ export async function getPriceDiffReportPage({ sede, page = 1, limit = 100, prod
           if (diff !== 0) status = "DIFERENTE";
         }
 
-        // Para productos variables: evaluar cada variación vs SIESA
+        // Para productos variables: evaluar cada variación con su precio SIESA por unidad
         const variationRows = variations.map(v => {
           const vName = v.attributes?.map(a => a.option).join(', ') || v.sku || `#${v.id}`;
+          const varUnit = v.sku ? v.sku.replace(p.item, '').trim() : null;
+          const unitPrice = varUnit && allPrices[varUnit] ? allPrices[varUnit] : null;
+          const varSiesaPrice = unitPrice?.precio ?? null;
+
           let vDiff = null;
           let vStatus = "OK";
-          if (!siesaPrice) {
+          if (!varSiesaPrice) {
             vStatus = "NO_SIESA";
           } else {
-            vDiff = siesaPrice - (v.price || 0);
+            vDiff = varSiesaPrice - (v.price || 0);
             if (vDiff !== 0) vStatus = "DIFERENTE";
           }
           return {
@@ -1482,6 +1601,8 @@ export async function getPriceDiffReportPage({ sede, page = 1, limit = 100, prod
             sku: v.sku || '',
             name: vName,
             woo_price: v.price,
+            siesa_price: varSiesaPrice,
+            siesa_unit: varUnit || null,
             diff: vDiff,
             status: vStatus,
             woo_stock: v.stock

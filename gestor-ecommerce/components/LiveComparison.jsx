@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { fetchLiveComparison, adoptWooProducts, updateWooProduct, fetchPriceDiffReport } from "../services";
+import { fetchLiveComparison, adoptWooProducts, updateWooProduct, fetchPriceDiffReport, syncVariationPrice } from "../services";
 import "../GestorEcommerce.css"; // Usa los estilos globales
 
 const CURRENCY = new Intl.NumberFormat("es-CO", {
@@ -13,6 +13,7 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
   const [data, setData] = useState([]);        // Datos filtrados para mostrar
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncingVarId, setSyncingVarId] = useState(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [totalItemsDb, setTotalItemsDb] = useState(0);
@@ -123,6 +124,39 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
     setFilterType(type);
   };
 
+  const handleSyncVariation = async (row, variation) => {
+    if (!row.woo_product_id || !variation.siesa_price) return;
+    if (!confirm(`¿Actualizar variación "${variation.name}" de ${CURRENCY.format(variation.price)} a ${CURRENCY.format(variation.siesa_price)}?`)) return;
+
+    setSyncingVarId(variation.id);
+    try {
+      const res = await syncVariationPrice(row.woo_product_id, variation.id, variation.siesa_price);
+      if (res.ok) {
+        // Actualizar localmente
+        const updater = (prev) => prev.map(p => {
+          if (p.item !== row.item) return p;
+          return {
+            ...p,
+            variations: p.variations.map(v => {
+              if (v.id !== variation.id) return v;
+              return { ...v, price: variation.siesa_price, price_diff: 0, price_status: 'OK' };
+            })
+          };
+        });
+        setRawData(updater);
+        setData(prev => applyFilter(updater(rawData), filterType));
+        alert("✅ Variación sincronizada correctamente");
+      } else {
+        alert("❌ Error: " + (res.message || "No se pudo actualizar"));
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error de conexión");
+    } finally {
+      setSyncingVarId(null);
+    }
+  };
+
   // ══════ REPORTE DE DIFERENCIAS ══════
   const CONCURRENT_PAGES = 5; // Páginas en paralelo
 
@@ -212,11 +246,11 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
           'Tipo': 'VARIABLE',
           'Variación': '',
           'SKU Variación': '',
+          'Unidad SIESA': r.unidad || '',
           'Precio SIESA': r.siesa_price,
           'Precio WooCommerce': r.woo_price,
           'Diferencia': r.diff,
           'Estado': r.status,
-          'Unidad': r.unidad || '',
           'Stock WC': r.woo_stock
         });
         // Filas variación
@@ -227,11 +261,11 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
             'Tipo': 'Variación',
             'Variación': v.name,
             'SKU Variación': v.sku,
-            'Precio SIESA': r.siesa_price,
+            'Unidad SIESA': v.siesa_unit || '',
+            'Precio SIESA': v.siesa_price,
             'Precio WooCommerce': v.woo_price,
             'Diferencia': v.diff,
             'Estado': v.status,
-            'Unidad': r.unidad || '',
             'Stock WC': v.woo_stock
           });
         }
@@ -556,29 +590,52 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
                             <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>↳</span>
                             <div>
                               <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#4338ca' }}>{v.name}</div>
-                              <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>SKU: {v.sku || '—'}</div>
+                              <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>SKU: {v.sku || '—'}{v.siesa_unit ? ` · ${v.siesa_unit}` : ''}</div>
                             </div>
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <span style={{ fontSize: '0.72rem', background: '#e0e7ff', color: '#4338ca', padding: '2px 8px', borderRadius: '10px', fontWeight: 500 }}>
-                            Variación
+                          <span className={`ge-badge status-${v.price_status || 'UNKNOWN'}`} style={{ fontSize: '0.72rem' }}>
+                            {(v.price_status || '—').replace(/_/g, " ")}
                           </span>
                         </td>
-                        <td className="text-center" style={{ color: '#9ca3af', fontSize: '0.82rem' }}>—</td>
                         <td className="text-center">
-                          <div style={{ fontWeight: 600, color: '#4338ca' }}>
+                          <div style={{ fontWeight: 500, fontSize: '0.85rem', color: v.siesa_price ? '#111827' : '#9ca3af' }}>
+                            {v.siesa_price ? CURRENCY.format(v.siesa_price) : '—'}
+                          </div>
+                          {v.siesa_unit && <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{v.siesa_unit}</span>}
+                        </td>
+                        <td className="text-center">
+                          <div style={{ fontWeight: 600, color: '#4338ca', fontSize: '0.85rem' }}>
                             {v.price ? CURRENCY.format(v.price) : "N/A"}
                           </div>
                         </td>
-                        <td className="text-center" style={{ color: '#9ca3af' }}>—</td>
+                        <td className="text-center">
+                          <span className={v.price_diff !== 0 && v.price_diff !== null ? "ge-price-diff-pos" : "ge-price-diff-zero"} style={{ display: 'inline-block', minWidth: '80px', fontSize: '0.85rem' }}>
+                            {v.price_diff != null ? CURRENCY.format(v.price_diff) : "—"}
+                          </span>
+                        </td>
                         <td className="text-center" style={{ color: '#9ca3af', fontSize: '0.82rem' }}>—</td>
                         <td className="text-center">
                           <div style={{ fontWeight: 'bold', color: v.stock !== null && v.stock > 0 ? '#059669' : '#dc2626' }}>
                             {v.stock !== null ? v.stock : '—'}
                           </div>
                         </td>
-                        <td className="text-center" />
+                        <td className="text-center">
+                          {v.price_status === 'DIFERENTE' && v.siesa_price && (
+                            <button
+                              className="ge-btn info"
+                              style={{ padding: '4px 12px', fontSize: '0.78rem', fontWeight: 600 }}
+                              disabled={syncingVarId === v.id}
+                              onClick={() => handleSyncVariation(row, v)}
+                            >
+                              {syncingVarId === v.id ? '⏳' : 'Sync'}
+                            </button>
+                          )}
+                          {v.price_status === 'OK' && (
+                            <span style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 600 }}>OK</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </React.Fragment>
@@ -802,7 +859,7 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
                               <span style={{ color: '#94a3b8', marginRight: '4px' }}>↳</span>
                               <span style={{ fontSize: '0.82rem', color: '#4338ca', fontWeight: 600 }}>{v.name}</span>
                             </td>
-                            <td style={{ fontSize: '0.78rem', color: '#9ca3af' }}>SKU: {v.sku || '—'}</td>
+                            <td style={{ fontSize: '0.78rem', color: '#9ca3af' }}>SKU: {v.sku || '—'}{v.siesa_unit ? ` · ${v.siesa_unit}` : ''}</td>
                             <td style={{ textAlign: 'center' }}>
                               <span style={{ fontSize: '0.68rem', background: '#e0e7ff', color: '#4338ca', padding: '1px 6px', borderRadius: '8px' }}>Variación</span>
                             </td>
@@ -813,7 +870,9 @@ export default function LiveComparison({ sedeInfo, esAdminGlobal, sedes = [], on
                                 color: v.status === 'DIFERENTE' ? '#d97706' : v.status === 'NO_SIESA' ? '#dc2626' : '#059669'
                               }}>{v.status}</span>
                             </td>
-                            <td style={{ textAlign: 'right', color: '#9ca3af', fontSize: '0.82rem' }}>{r.siesa_price ? CURRENCY.format(r.siesa_price) : '—'}</td>
+                            <td style={{ textAlign: 'right', fontSize: '0.82rem', fontWeight: v.siesa_price ? 500 : 400, color: v.siesa_price ? '#111827' : '#9ca3af' }}>
+                              {v.siesa_price ? CURRENCY.format(v.siesa_price) : '—'}
+                            </td>
                             <td style={{ textAlign: 'right', fontWeight: 600, color: '#4338ca', fontSize: '0.82rem' }}>
                               {v.woo_price != null ? CURRENCY.format(v.woo_price) : '—'}
                             </td>

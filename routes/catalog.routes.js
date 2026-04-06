@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import { listCatalog, toggleItem, adoptWooProducts, liveCompare, priceDiffReport, debugItem, updateProduct, listCategories, createCategory, getProductDetail, listVariations, updateVariationImage, listTags, createTag, deleteTag, createNewProduct, getWooDetailsBatch, getDashboardStats, getSedes } from "../controllers/catalog.controller.js";
+import { listCatalog, toggleItem, adoptWooProducts, liveCompare, priceDiffReport, debugItem, updateProduct, listCategories, createCategory, getProductDetail, listVariations, updateVariationImage, syncVariationPrice, listTags, createTag, deleteTag, createNewProduct, getWooDetailsBatch, getDashboardStats, getSedes } from "../controllers/catalog.controller.js";
 import { uploadImage } from "../controllers/upload.controller.js";
 
 const router = express.Router();
@@ -15,6 +15,7 @@ router.get("/debug/:sku", debugItem);
 router.get("/product/:id", getProductDetail);
 router.get("/product/:id/variations", listVariations);
 router.put("/product/:id/variations/:varId", updateVariationImage);
+router.put("/product/:id/variations/:varId/sync-price", syncVariationPrice);
 router.put("/product/:id", updateProduct); 
 router.post("/product", createNewProduct); // Crear nuevo en Woo
 router.post("/toggle", toggleItem);

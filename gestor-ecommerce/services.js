@@ -172,6 +172,15 @@ export async function updateVariationImage(wooId, varId, imageSrc) {
     return res.json();
 }
 
+export async function syncVariationPrice(wooId, varId, price) {
+    const res = await fetch(`${API_URL}/catalog/product/${wooId}/variations/${varId}/sync-price`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ price })
+    });
+    return res.json();
+}
+
 // --- BANNERS ---
 export async function fetchBanners(section = 'home_slider') {
   const res = await fetch(`${API_URL}/content/banners?section=${section}`);
