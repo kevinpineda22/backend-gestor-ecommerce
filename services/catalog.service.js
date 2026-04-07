@@ -583,20 +583,25 @@ export async function updateProductInWoo(wooId, data) {
   }
 
   // Manejo de Imágenes (Múltiples) — Soporte mixto: {id,src} (existentes) y strings (nuevas)
-  if (data.images && Array.isArray(data.images) && data.images.length > 0) {
-    const mapped = data.images
-      .filter(img => img)
-      .map(img => {
-        // Imagen existente de WooCommerce: conservar por ID (NO re-sube)
-        if (typeof img === 'object' && img.id) return { id: img.id };
-        // URL nueva (string): WC la descargará
-        if (typeof img === 'string' && img.trim().length > 0) return { src: img.trim() };
-        // Objeto sin id pero con src (fallback)
-        if (typeof img === 'object' && img.src) return { src: img.src.trim() };
-        return null;
-      })
-      .filter(Boolean);
-    if (mapped.length > 0) payload.images = mapped;
+  if (Array.isArray(data.images)) {
+    if (data.images.length === 0) {
+      // Array vacío explícito: el usuario borró todas las imágenes → limpiar en WooCommerce
+      payload.images = [];
+    } else {
+      const mapped = data.images
+        .filter(img => img)
+        .map(img => {
+          // Imagen existente de WooCommerce: conservar por ID (NO re-sube)
+          if (typeof img === 'object' && img.id) return { id: img.id };
+          // URL nueva (string): WC la descargará
+          if (typeof img === 'string' && img.trim().length > 0) return { src: img.trim() };
+          // Objeto sin id pero con src (fallback)
+          if (typeof img === 'object' && img.src) return { src: img.src.trim() };
+          return null;
+        })
+        .filter(Boolean);
+      if (mapped.length > 0) payload.images = mapped;
+    }
   } else if (data.image_url && typeof data.image_url === 'string' && data.image_url.trim().length > 0) {
     payload.images = [{ src: data.image_url.trim() }];
   }

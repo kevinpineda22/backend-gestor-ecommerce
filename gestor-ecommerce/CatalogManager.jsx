@@ -351,9 +351,11 @@ export default function CatalogManager({ sedeInfo, sedes = [] }) {
 
   const handleSaveProduct = useCallback(async (modifiedItem) => {
     try {
-      const finalImages = modifiedItem.images?.length > 0
-        ? modifiedItem.images
-        : (modifiedItem.image_url ? [modifiedItem.image_url] : []);
+      // Si el usuario borró todas las imágenes, respetar array vacío (no hacer fallback a image_url)
+      // Solo usar image_url como fallback en productos NUEVOS que aún no tienen galería cargada
+      const finalImages = modifiedItem.isNew && (!modifiedItem.images || modifiedItem.images.length === 0)
+        ? (modifiedItem.image_url ? [modifiedItem.image_url] : [])
+        : (modifiedItem.images || []);
 
       let res;
       if (modifiedItem.isNew) {
