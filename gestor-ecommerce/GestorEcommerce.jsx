@@ -90,7 +90,7 @@ const GestorEcommerce = () => {
 
       <aside className={`ge-sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="ge-sidebar-header">
-          <Link to="/acceso" className="ge-back-button"><FaArrowLeft /></Link>
+          <Link to="/acceso" className="ge-back-button" title="Volver al panel principal"><FaArrowLeft /></Link>
           <div className="ge-sidebar-logo">EM</div>
           <h2 className="ge-sidebar-title">EcomManager</h2>
         </div>
@@ -98,7 +98,7 @@ const GestorEcommerce = () => {
         {/* Sede Selector */}
         <div className="ge-sede-selector">
           <div className="ge-sede-selector-label">
-            {esAdminGlobal ? '👑 Admin Global' : '🏪 Encargado'}
+            {esAdminGlobal ? 'Admin Global' : 'Encargado'}
           </div>
           {esAdminGlobal && sedes.length > 1 ? (
             <select
@@ -152,8 +152,11 @@ const GestorEcommerce = () => {
         </nav>
 
         <div className="ge-sidebar-footer">
-          <div className="ge-footer-name">{empleado.nombre || 'Usuario'}</div>
-          <div className="ge-footer-role">{esAdminGlobal ? '👑 Admin Global' : sedeActual?.nombre || ''}</div>
+          <div className="ge-footer-avatar">{(empleado.nombre || 'U').charAt(0).toUpperCase()}</div>
+          <div className="ge-footer-info">
+            <div className="ge-footer-name">{empleado.nombre || 'Usuario'}</div>
+            <div className="ge-footer-role">{esAdminGlobal ? 'Admin Global' : sedeActual?.nombre || ''}</div>
+          </div>
         </div>
       </aside>
 

@@ -57,6 +57,18 @@ router.get('/discounts', async (req, res) => {
     }
 });
 
+// POST /api/content/discounts/apply-value-discounts
+// Aplica sale_price directamente en WooCommerce para descuentos tipo "value_discount"
+router.post('/discounts/apply-value-discounts', async (req, res) => {
+    try {
+        const result = await contentService.applyValueDiscountsToWoo(req.body);
+        res.json(result);
+    } catch (err) {
+        console.error("Error applying value discounts:", err);
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
 // POST /api/content/discounts
 router.post('/discounts', async (req, res) => {
     try {

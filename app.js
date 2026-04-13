@@ -4,6 +4,7 @@ import cors from "cors";
 import wooRoutes from "./routes/woo.routes.js";
 import catalogRoutes from "./routes/catalog.routes.js";
 import contentRoutes from "./routes/content.routes.js";
+import cronRoutes from "./routes/cron.routes.js";
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(express.json());
 app.use("/api/woo", wooRoutes);
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/content", contentRoutes);
+app.use("/api/cron", cronRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "Gestor Ecommerce API OK" });

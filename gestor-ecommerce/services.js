@@ -261,6 +261,16 @@ export async function syncDiscountRulesToWP(wpUrl, rules) {
   return res.json();
 }
 
+// --- APLICAR DESCUENTOS DE VALOR (sale_price) EN WOOCOMMERCE ---
+export async function applyValueDiscounts(data) {
+  const res = await fetch(`${API_URL}/content/discounts/apply-value-discounts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
 // --- CONFIGURACIÓN LOGÍSTICA POR SEDE ---
 export async function fetchLogisticsConfig(sedeCode) {
   const res = await fetch(`${API_URL}/content/logistics/${encodeURIComponent(sedeCode)}`);

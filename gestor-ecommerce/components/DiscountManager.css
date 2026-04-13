@@ -809,3 +809,214 @@
     border-radius: var(--ge-radius);
     border: 1px solid var(--ge-border);
 }
+
+/* ═══════ VALUE DISCOUNT - Tabla de descuentos individuales ═══════ */
+
+.dm-value-discount-info {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: #f0f4ff;
+    border: 1px solid #c7d4f0;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 8px;
+    font-size: 0.82rem;
+    color: #3a4a6b;
+    line-height: 1.5;
+}
+
+.dm-info-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border-radius: 50%;
+    background: #4a6cf7;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.75rem;
+    margin-top: 1px;
+}
+
+.dm-value-discount-info code {
+    background: #dce3f5;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+}
+
+/* Tabla de productos con descuento individual */
+.dm-product-discounts-table {
+    border: 1px solid var(--ge-border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.dm-pd-header {
+    display: grid;
+    grid-template-columns: 90px 1fr 80px 120px 36px;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #f5f6fa;
+    border-bottom: 1px solid var(--ge-border);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--ge-text-light);
+    letter-spacing: 0.5px;
+}
+
+.dm-pd-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 80px 120px 36px;
+    gap: 6px;
+    padding: 6px 12px;
+    align-items: center;
+    font-size: 0.82rem;
+    border-bottom: 1px solid #f0f1f5;
+    transition: background 0.15s;
+}
+
+.dm-pd-row:last-child {
+    border-bottom: none;
+}
+
+.dm-pd-row:hover {
+    background: #f8f9fc;
+}
+
+.dm-pd-col-sku {
+    font-family: monospace;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--ge-primary);
+}
+
+.dm-pd-col-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ge-text);
+}
+
+.dm-pd-col-var {
+    text-align: center;
+}
+
+.dm-var-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #ede9fe;
+    color: #6d28d9;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.dm-var-none {
+    color: #c0c4cc;
+    font-size: 0.78rem;
+}
+
+.dm-pd-col-val {
+    text-align: right;
+}
+
+.dm-pd-val-input {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.dm-pd-val-prefix {
+    font-weight: 600;
+    color: var(--ge-text-light);
+    font-size: 0.82rem;
+}
+
+.dm-pd-amount {
+    width: 85px !important;
+    padding: 4px 6px !important;
+    font-size: 0.82rem !important;
+    text-align: right;
+}
+
+.dm-pd-remove {
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    padding: 0 !important;
+    font-size: 0.75rem !important;
+    line-height: 1;
+}
+
+.dm-pd-summary {
+    padding: 8px 12px;
+    background: #f9fafb;
+    border-top: 1px solid var(--ge-border);
+    font-size: 0.75rem;
+    color: var(--ge-text-light);
+}
+
+.dm-pd-var-count {
+    color: #6d28d9;
+    font-weight: 500;
+}
+
+/* Badge tipo en la lista de reglas */
+.dm-type-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
+}
+
+.dm-type-badge.value {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.dm-var-info {
+    display: inline-block;
+    font-size: 0.72rem;
+    color: #6d28d9;
+    font-weight: 500;
+    margin-left: 4px;
+}
+
+/* Badge value-dscto en la lista de reglas */
+.ge-badge.discount.value-dscto {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: #78350f;
+}
+
+/* Botones de aplicar/quitar sale_price */
+.ge-btn.icon.outline-success {
+    border-color: #10b981;
+    color: #10b981;
+}
+
+.ge-btn.icon.outline-success:hover {
+    background: #10b981;
+    color: #fff;
+}
+
+.ge-btn.icon.outline-warning {
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
+.ge-btn.icon.outline-warning:hover {
+    background: #f59e0b;
+    color: #fff;
+}

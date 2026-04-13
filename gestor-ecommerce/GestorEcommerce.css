@@ -31,7 +31,6 @@
   --ge-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --ge-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
   --ge-sidebar-width: 260px;
-  --ge-font: 'Inter', system-ui, -apple-system, sans-serif;
   --ge-transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -39,7 +38,6 @@
 .ge-container {
   display: flex;
   min-height: 100vh;
-  font-family: var(--ge-font);
   background-color: var(--ge-bg);
   color: var(--ge-text);
 }
@@ -235,38 +233,81 @@
   font-size: 0.88rem;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
 }
 
 .ge-nav-button:hover {
   background: rgba(255, 255, 255, 0.08);
   color: white;
   border-left-color: rgba(139, 213, 0, 0.4);
+  padding-left: 24px;
 }
 
 .ge-nav-button.active {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(139, 213, 0, 0.08);
   color: white;
   border-left-color: var(--ge-accent);
   font-weight: 600;
+  padding-left: 24px;
+}
+
+.ge-nav-button.active::after {
+  content: '';
+  position: absolute;
+  right: 16px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ge-accent);
+  box-shadow: 0 0 6px rgba(139, 213, 0, 0.5);
 }
 
 /* ═══ Sidebar Footer ═══ */
 .ge-sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ge-footer-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--ge-accent) 0%, #6faa00 100%);
+  color: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(139, 213, 0, 0.25);
+}
+
+.ge-footer-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .ge-footer-name {
   font-size: 0.8rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.85);
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ge-footer-role {
   font-size: 0.68rem;
   color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ═══════ MAIN CONTENT ═══════ */
@@ -284,6 +325,11 @@
   border-radius: var(--ge-radius-lg);
   box-shadow: var(--ge-shadow-sm);
   border: 1px solid var(--ge-border);
+  transition: box-shadow 0.2s;
+}
+
+.ge-card:hover {
+  box-shadow: var(--ge-shadow-md);
 }
 
 .ge-card.pad {
@@ -372,6 +418,7 @@
 .ge-btn:hover {
   opacity: 0.9;
   transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .ge-btn:active {
@@ -646,6 +693,7 @@
 /* ═══════ TABLE ═══════ */
 .ge-table-container {
   overflow-x: auto;
+  border-radius: var(--ge-radius-lg);
 }
 
 .ge-table {
@@ -657,23 +705,31 @@
 .ge-table th {
   text-align: left;
   padding: 14px 20px;
-  background-color: var(--ge-bg);
+  background: linear-gradient(180deg, var(--ge-bg) 0%, #eef0f3 100%);
   color: var(--ge-text);
   font-weight: 600;
   border-bottom: 2px solid var(--ge-border);
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .ge-table td {
   padding: 14px 20px;
   border-bottom: 1px solid var(--ge-border-light);
   color: var(--ge-text);
+  transition: background-color 0.15s;
 }
 
-.ge-table tr:hover {
-  background-color: var(--ge-bg-hover);
+.ge-table tr {
+  transition: background-color 0.15s;
+}
+
+.ge-table tbody tr:hover {
+  background-color: var(--ge-primary-light);
 }
 
 .ge-table tr:last-child td {
@@ -1000,10 +1056,14 @@
 
 /* ═══════ EMPTY STATE ═══════ */
 .ge-empty {
-  padding: 40px;
+  padding: 48px 40px;
   text-align: center;
   color: var(--ge-text-light);
   font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ═══════ SEARCH DROPDOWN ═══════ */

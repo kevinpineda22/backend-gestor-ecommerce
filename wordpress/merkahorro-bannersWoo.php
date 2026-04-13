@@ -159,11 +159,17 @@ function merkahorro_slider_shortcode($atts) {
 
     ob_start();
     ?>
+    <?php /* Precargar TODAS las imágenes del slider para evitar parpadeo */ ?>
+    <?php foreach ($banners as $pi => $pb): ?>
+        <link rel="preload" as="image" href="<?php echo esc_url($pb['image_url']); ?>"<?php echo $pi === 0 ? ' fetchpriority="high"' : ''; ?>>
+    <?php endforeach; ?>
     <style>
         .mks-slider { position: relative; width: 100%; overflow: hidden; border-radius: 12px; }
         .mks-slider .mks-slides-wrap { position: relative; width: 100%; }
-        .mks-slider .mks-slide { display: none; width: 100%; }
-        .mks-slider .mks-slide.active { display: block; }
+        /* Primer slide establece el flujo, los demás se apilan encima */
+        .mks-slider .mks-slide { position: absolute; top: 0; left: 0; width: 100%; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
+        .mks-slider .mks-slide:first-child { position: relative; }
+        .mks-slider .mks-slide.active { opacity: 1; z-index: 2; pointer-events: auto; }
         .mks-slider .mks-slide img { width: 100%; height: auto; display: block; }
         .mks-slider .mks-slide a { display: block; width: 100%; }
         .mks-slider .mks-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; background: rgba(0,0,0,0.35); color: white; border: none; font-size: 1.5rem; padding: 12px 16px; cursor: pointer; border-radius: 4px; transition: background 0.2s; }
@@ -185,10 +191,10 @@ function merkahorro_slider_shortcode($atts) {
             <div class="mks-slide <?php echo $i === 0 ? 'active' : ''; ?>">
                 <?php if (!empty($banner['link_url'])): ?>
                     <a href="<?php echo esc_url($banner['link_url']); ?>">
-                        <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="<?php echo $i === 0 ? 'eager' : 'lazy'; ?>">
+                        <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="eager" decoding="async">
                     </a>
                 <?php else: ?>
-                    <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="<?php echo $i === 0 ? 'eager' : 'lazy'; ?>">
+                    <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="eager" decoding="async">
                 <?php endif; ?>
             </div>
         <?php endforeach; ?>
@@ -302,7 +308,8 @@ function merkahorro_tiles_shortcode($atts) {
             transform: translateY(-4px);
             box-shadow: 0 6px 20px rgba(0,0,0,0.15);
         }
-        .mks-tile img { width: 100%; height: auto; display: block; }
+        .mks-tile img { width: 100%; height: auto; display: block; opacity: 0; transition: opacity 0.4s ease; }
+        .mks-tile img.mks-loaded { opacity: 1; }
         .mks-tile a { display: block; }
         /* Navegación carrusel */
         .mks-tiles-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; background: rgba(0,0,0,0.4); color: white; border: none; font-size: 1.3rem; padding: 10px 14px; cursor: pointer; border-radius: 6px; transition: background 0.2s; }
@@ -329,10 +336,10 @@ function merkahorro_tiles_shortcode($atts) {
                 <div class="mks-tile">
                     <?php if (!empty($banner['link_url'])): ?>
                         <a href="<?php echo esc_url($banner['link_url']); ?>">
-                            <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="lazy">
+                            <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="lazy" decoding="async" onload="this.classList.add('mks-loaded')">
                         </a>
                     <?php else: ?>
-                        <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="lazy">
+                        <img src="<?php echo esc_url($banner['image_url']); ?>" alt="<?php echo esc_attr($banner['title'] ?? ''); ?>" loading="lazy" decoding="async" onload="this.classList.add('mks-loaded')">
                     <?php endif; ?>
                 </div>
             <?php endforeach; ?>
@@ -665,6 +672,7 @@ add_action('rest_api_init', function() {
                 $conditions = json_decode($rule['conditions'] ?? '[]', true);
                 $discounts = json_decode($rule['product_adjustments'] ?? '{}', true);
                 $additional = json_decode($rule['additional'] ?? '{}', true);
+                $adv_message = json_decode($rule['advanced_discount_message'] ?? '{}', true);
 
                 // Extraer tipo y valor del descuento
                 $discount_type = 'percentage';
@@ -762,6 +770,10 @@ add_action('rest_api_init', function() {
                     'raw_filters'     => $filters,
                     'raw_conditions'  => $conditions,
                     'raw_discounts'   => $discounts,
+                    'badge_enabled'   => ($adv_message['display'] ?? '0') === '1',
+                    'badge_text'      => $adv_message['badge_text'] ?? '',
+                    'badge_bg_color'  => $adv_message['badge_color'] ?? '#160857',
+                    'badge_text_color' => $adv_message['badge_text_color'] ?? '#88dc00',
                     'created_at'      => $rule['created_at'] ?? null,
                     'modified_at'     => $rule['modified_at'] ?? null,
                 );
@@ -806,16 +818,23 @@ add_action('rest_api_init', function() {
                 return new WP_REST_Response(array('ok' => false, 'message' => 'No se recibieron reglas'), 200);
             }
 
-            // PASO 1: Eliminar TODAS las reglas previas del Gestor (prefijo [MK-Gestor])
-            // Esto garantiza que reglas eliminadas/desactivadas no queden huérfanas
-            $wpdb->query($wpdb->prepare(
-                "DELETE FROM {$table} WHERE title LIKE %s",
-                $prefix . '%'
-            ));
+            // PASO 1: Obtener reglas existentes del Gestor indexadas por título
+            // Esto permite ACTUALIZAR en vez de borrar+crear, preservando el ID y config de badge
+            $existing = $wpdb->get_results(
+                $wpdb->prepare("SELECT id, title FROM {$table} WHERE title LIKE %s", $prefix . '%'),
+                ARRAY_A
+            );
+            $existing_map = array();
+            foreach ($existing as $row) {
+                $existing_map[$row['title']] = (int) $row['id'];
+            }
 
-            // PASO 2: Insertar todas las reglas activas con el prefijo
+            // PASO 2: Upsert — actualizar si existe, insertar si no
             $synced = 0;
+            $updated = 0;
+            $created = 0;
             $errors = array();
+            $processed_titles = array();
 
             foreach ($rules as $rule) {
                 // Agregar prefijo al título para identificar reglas del Gestor
@@ -827,8 +846,30 @@ add_action('rest_api_init', function() {
                     continue;
                 }
 
-                $wpdb->insert($table, $wdr_data);
+                $processed_titles[] = $rule['title'];
+
+                if (isset($existing_map[$rule['title']])) {
+                    // ACTUALIZAR — preservar campos que no manejamos (advanced_discount_message, etc.)
+                    $rule_id = $existing_map[$rule['title']];
+                    // No sobreescribir created_on, created_by ni advanced_discount_message
+                    unset($wdr_data['created_on']);
+                    unset($wdr_data['created_by']);
+                    unset($wdr_data['advanced_discount_message']);
+                    $wpdb->update($table, $wdr_data, array('id' => $rule_id));
+                    $updated++;
+                } else {
+                    // INSERTAR — regla nueva
+                    $wpdb->insert($table, $wdr_data);
+                    $created++;
+                }
                 $synced++;
+            }
+
+            // PASO 3: Eliminar reglas del Gestor que ya no existen en el listado
+            foreach ($existing_map as $title => $id) {
+                if (!in_array($title, $processed_titles)) {
+                    $wpdb->delete($table, array('id' => $id));
+                }
             }
 
             // PASO 3: Limpiar caché del plugin FlyCart
@@ -846,9 +887,10 @@ add_action('rest_api_init', function() {
             return new WP_REST_Response(array(
                 'ok' => true,
                 'synced' => $synced,
-                'deleted_old' => true,
+                'updated' => $updated,
+                'created' => $created,
                 'errors' => $errors,
-                'message' => "Se sincronizaron {$synced} reglas. Las reglas anteriores del Gestor fueron reemplazadas."
+                'message' => "Se sincronizaron {$synced} reglas ({$updated} actualizadas, {$created} nuevas). Config de badges preservada."
             ), 200);
         },
         'permission_callback' => function($request) {
@@ -914,6 +956,12 @@ function merkahorro_build_wdr_rule($rule) {
     $date_end = $rule['date_end'] ?? null;
     $active = !empty($rule['active']) ? '1' : '0';
     $priority = intval($rule['display_order'] ?? 0);
+
+    // --- Badge / Barra de descuento ---
+    $badge_enabled = isset($rule['badge_enabled']) ? ($rule['badge_enabled'] ? '1' : '0') : '0';
+    $badge_text = $rule['badge_text'] ?? '';
+    $badge_bg_color = $rule['badge_bg_color'] ?? '#160857';
+    $badge_text_color = $rule['badge_text_color'] ?? '#88dc00';
 
     // --- Filters: a qué productos aplica ---
     $filters = array();
@@ -1022,7 +1070,11 @@ function merkahorro_build_wdr_rule($rule) {
         )),
         'max_discount_sum'     => '',
         'advanced_discount_message' => wp_json_encode(array(
-            'display' => '0',
+            'display' => $badge_enabled,
+            'badge_color_option' => 'custom',
+            'badge_color' => $badge_bg_color,
+            'badge_text_color' => $badge_text_color,
+            'badge_text' => $badge_text,
         )),
         'discount_type'        => 'wdr_simple_discount',
         'used_coupons'         => '',

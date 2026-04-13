@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 import "./BannerManager.css";
@@ -29,6 +29,15 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
   const [currentSlide, setCurrentSlide] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
+
+  const formRef = useRef(null);
+
+  // Scroll suave al formulario cuando se abre
+  const scrollToForm = () => {
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  };
 
   // Form state
   const [form, setForm] = useState({
@@ -103,6 +112,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
     resetForm();
     setForm(f => ({ ...f, section: activeSection, display_order: banners.length, sedes: esAdminGlobal ? null : (userSedeCode ? [userSedeCode] : null) }));
     setShowForm(true);
+    scrollToForm();
   };
 
   const openEdit = (banner) => {
@@ -113,6 +123,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
       sedes: banner.sedes || null
     });
     setShowForm(true);
+    scrollToForm();
   };
 
   const handleImageUpload = async (e) => {
@@ -258,12 +269,12 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
       {/* Header */}
       <div className="ge-header">
         <div className="ge-title">
-          <h2>Gestión de Banners</h2>
+          <h2>Gestion de Banners</h2>
           <p>Administra los sliders y promociones de la tienda</p>
         </div>
         <div className="ge-header-actions">
           <button className="ge-btn accent" onClick={handlePublish} disabled={publishing}>
-            {publishing ? "Publicando..." : "🚀 Publicar en tienda"}
+            {publishing ? "Publicando..." : "Publicar en tienda"}
           </button>
           <button className="ge-btn" onClick={openCreate}>+ Nuevo Banner</button>
         </div>
@@ -427,7 +438,7 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
 
       {/* Formulario */}
       {showForm && (
-        <div className="bm-form-panel">
+        <div className="bm-form-panel" ref={formRef}>
           <div className="bm-form-header">
             <div className="bm-form-header-icon">{editingBanner ? '✏️' : '➕'}</div>
             <div>
@@ -537,22 +548,30 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
 
       {/* Lista de banners */}
       {loading ? (
-        <div className="ge-card ge-empty">Cargando banners...</div>
+        <div className="ge-card ge-empty">
+          <div className="bm-loading-spinner"></div>
+          <span>Cargando banners...</span>
+        </div>
       ) : banners.length === 0 ? (
-        <div className="ge-card ge-empty">No hay banners en "{sectionInfo?.label}". Crea el primero.</div>
+        <div className="ge-card ge-empty bm-empty-state">
+          <div className="bm-empty-icon">{activeSection === 'home_slider' ? '🖼' : '🏷'}</div>
+          <div className="bm-empty-title">No hay banners en "{sectionInfo?.label}"</div>
+          <div className="bm-empty-desc">Crea el primero para comenzar a personalizar tu tienda</div>
+          <button className="ge-btn" onClick={openCreate} style={{ marginTop: 12 }}>+ Crear Banner</button>
+        </div>
       ) : (
         <div className="bm-banner-list">
           <div className="bm-list-header">
             <span className="bm-list-col-pos">#</span>
             <span className="bm-list-col-img">Imagen</span>
-            <span className="bm-list-col-info">Información</span>
+            <span className="bm-list-col-info">Informacion</span>
             <span className="bm-list-col-status">Estado</span>
             <span className="bm-list-col-actions">Acciones</span>
           </div>
           {banners.map((banner, idx) => (
             <div
               key={banner.id}
-              className={`bm-list-row ${banner.active ? '' : 'dimmed'} ${draggedId === banner.id ? 'bm-dragging' : ''} ${dragOverId === banner.id && draggedId !== banner.id ? 'bm-drag-over' : ''}`}
+              className={`bm-list-row ${banner.active ? '' : 'dimmed'} ${draggedId === banner.id ? 'bm-dragging' : ''} ${dragOverId === banner.id && draggedId !== banner.id ? 'bm-drag-over' : ''} ${editingBanner?.id === banner.id ? 'bm-editing' : ''}`}
               draggable
               onDragStart={(e) => handleDragStart(e, banner.id)}
               onDragOver={(e) => handleDragOver(e, banner.id)}
