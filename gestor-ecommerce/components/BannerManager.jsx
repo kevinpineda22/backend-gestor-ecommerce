@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef } from "react";
-import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, SEDE_WP_URLS } from "../services";
+import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, fetchDiscountRules, SEDE_WP_URLS } from "../services";
 import "../GestorEcommerce.css";
 import "./BannerManager.css";
 const SECTIONS = [
   { key: "home_slider", label: "🖼️ Slider Principal", desc: "Banner grande rotativo del inicio" },
   { key: "home_tiles", label: "🏷️ Tiles Promocionales", desc: "Cuadros pequeños debajo del slider" },
+  { key: "promo_separatas", label: "📋 Separatas Promo", desc: "Tarjetas de separatas y flyers promocionales" },
 ];
+
+// Genera la URL relativa de la página de promo — funciona en cualquier subdominio de sede
+function buildPromoUrl(rule) {
+  if (!rule) return '';
+  return `/promo/descuento/${rule.id}/`;
+}
 
 const FAKE_CATEGORIES = [
   "ASEO DEL HOGAR", "BEBIDAS", "BELLEZA", "CARNES Y PROTEÍNAS", "CONGELADOS",
@@ -16,6 +23,7 @@ const FAKE_CATEGORIES = [
 
 export default function BannerManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
   const [allBanners, setAllBanners] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -41,10 +49,13 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
 
   // Form state
   const [form, setForm] = useState({
-    title: "", image_url: "", link_url: "", active: true, display_order: 0, section: "home_slider", sedes: null
+    title: "", image_url: "", link_url: "", active: true, display_order: 0, section: "home_slider", sedes: null, discount_rule_id: null
   });
 
-  useEffect(() => { loadAllBanners(); }, []);
+  useEffect(() => {
+    loadAllBanners();
+    fetchDiscountRules().then(res => { if (res.ok) setDiscountRules(res.data || []); });
+  }, []);
 
   const loadAllBanners = async () => {
     setLoading(true);
@@ -103,14 +114,14 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
   const sedeCountGlobal = bannersInSection.filter(b => !b.sedes || b.sedes.length === 0).length;
 
   const resetForm = () => {
-    setForm({ title: "", image_url: "", link_url: "", active: true, display_order: 0, section: activeSection, sedes: null });
+    setForm({ title: "", image_url: "", link_url: "", active: true, display_order: 0, section: activeSection, sedes: null, discount_rule_id: null });
     setEditingBanner(null);
     setShowForm(false);
   };
 
   const openCreate = () => {
     resetForm();
-    setForm(f => ({ ...f, section: activeSection, display_order: banners.length, sedes: esAdminGlobal ? null : (userSedeCode ? [userSedeCode] : null) }));
+    setForm(f => ({ ...f, section: activeSection, display_order: banners.length, sedes: esAdminGlobal ? null : (userSedeCode ? [userSedeCode] : null), discount_rule_id: null }));
     setShowForm(true);
     scrollToForm();
   };
@@ -120,10 +131,29 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
     setForm({
       title: banner.title || "", image_url: banner.image_url || "", link_url: banner.link_url || "",
       active: banner.active, display_order: banner.display_order || 0, section: banner.section || "home_slider",
-      sedes: banner.sedes || null
+      sedes: banner.sedes || null, discount_rule_id: banner.discount_rule_id || null
     });
     setShowForm(true);
     scrollToForm();
+  };
+
+  // Al seleccionar una regla de descuento, auto-sugerir la link_url (ruta relativa, válida en todas las sedes)
+  const handleDiscountRuleChange = (ruleId) => {
+    const id = ruleId ? Number(ruleId) : null;
+    const rule = discountRules.find(r => r.id === id) || null;
+    setForm(f => ({
+      ...f,
+      discount_rule_id: id,
+      link_url: rule ? buildPromoUrl(rule) : f.link_url,
+    }));
+  };
+
+  // Helper: descripción legible del alcance de sedes de una regla
+  const getRuleSedeScope = (rule) => {
+    if (!rule) return null;
+    if (!rule.sedes || rule.sedes.length === 0) return { label: '🌐 Aplica en todas las sedes', color: 'var(--ge-success)' };
+    const nombres = rule.sedes.map(code => sedes.find(s => (s.codigo_siesa || s.slug) === code)?.nombre || code);
+    return { label: `📍 Solo en: ${nombres.join(', ')}`, color: 'var(--ge-warning, #d97706)' };
   };
 
   const handleImageUpload = async (e) => {
@@ -454,6 +484,8 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
               <div className="bm-form-help">
                 {form.section === 'home_slider'
                   ? '📐 Recomendado: 1200×1000px'
+                  : form.section === 'promo_separatas'
+                  ? '📐 Recomendado: 800×1100px (formato separata/flyer vertical)'
                   : '📐 Recomendado: 540×720px'}
               </div>
               {form.image_url ? (
@@ -486,8 +518,42 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
                 <input className="ge-input" placeholder="Ej: Promo Semana Santa" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
               </div>
               <div className="bm-form-field">
+                <label className="bm-form-label">Vincular a descuento</label>
+                <select
+                  className="ge-input"
+                  value={form.discount_rule_id || ""}
+                  onChange={e => handleDiscountRuleChange(e.target.value || null)}
+                >
+                  <option value="">— Sin regla de descuento —</option>
+                  {discountRules.filter(r => r.active).map(r => (
+                    <option key={r.id} value={r.id}>{r.title}</option>
+                  ))}
+                </select>
+                {form.discount_rule_id && (() => {
+                  const linked = discountRules.find(r => r.id === form.discount_rule_id);
+                  const scope = getRuleSedeScope(linked);
+                  return (
+                    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--ge-primary)' }}>
+                        🔗 Al hacer clic llevará a los productos de este descuento
+                      </div>
+                      {scope && (
+                        <div style={{ fontSize: '0.72rem', color: scope.color, fontWeight: 600 }}>
+                          {scope.label}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="bm-form-field">
                 <label className="bm-form-label">URL de destino</label>
-                <input className="ge-input" placeholder="https://tienda.com/promo" value={form.link_url} onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))} />
+                <input className="ge-input" placeholder="/promo/descuento/5/ o URL completa" value={form.link_url} onChange={e => setForm(f => ({ ...f, link_url: e.target.value }))} />
+                {form.discount_rule_id && (
+                  <div style={{ fontSize: '0.72rem', color: 'var(--ge-text-muted)', marginTop: 3 }}>
+                    Ruta relativa — funciona en todas las sedes automáticamente
+                  </div>
+                )}
               </div>
               <div className="bm-form-field" style={{ maxWidth: 100 }}>
                 <label className="bm-form-label">Orden</label>

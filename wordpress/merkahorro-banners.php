@@ -1084,3 +1084,250 @@ function merkahorro_build_wdr_rule($rule) {
         'modified_on'          => $now,
     );
 }
+
+// ═══════════════════════════════════════════════
+// SHORTCODE: [merkahorro_separatas]
+// Grilla de tarjetas de separatas / flyers promocionales
+// Uso: [merkahorro_separatas] en cualquier página o widget
+// ═══════════════════════════════════════════════
+function merkahorro_separatas_shortcode($atts) {
+    $atts = shortcode_atts(array(
+        'section' => 'promo_separatas',
+        'cols'    => '3',   // columnas en desktop
+    ), $atts);
+
+    $banners = merkahorro_get_banners($atts['section'], merkahorro_get_current_sede());
+
+    if (empty($banners)) {
+        return '<!-- Merkahorro Separatas: No hay separatas activas -->';
+    }
+
+    $grid_id = 'mks-sep-' . wp_rand(1000, 9999);
+    $cols    = max(1, min(6, intval($atts['cols'])));
+
+    ob_start();
+    ?>
+    <style>
+        #<?php echo $grid_id; ?> {
+            display: grid;
+            grid-template-columns: repeat(<?php echo $cols; ?>, 1fr);
+            gap: 18px;
+            margin: 20px 0;
+        }
+        #<?php echo $grid_id; ?> .mks-sep-card {
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.10);
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
+            background: #fff;
+        }
+        #<?php echo $grid_id; ?> .mks-sep-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        }
+        #<?php echo $grid_id; ?> .mks-sep-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        #<?php echo $grid_id; ?> .mks-sep-card a {
+            display: block;
+        }
+        @media (max-width: 900px) {
+            #<?php echo $grid_id; ?> { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 560px) {
+            #<?php echo $grid_id; ?> { grid-template-columns: 1fr; gap: 12px; }
+        }
+    </style>
+    <div id="<?php echo $grid_id; ?>">
+        <?php foreach ($banners as $sep): ?>
+            <div class="mks-sep-card">
+                <?php if (!empty($sep['link_url'])): ?>
+                    <a href="<?php echo esc_url($sep['link_url']); ?>">
+                        <img src="<?php echo esc_url($sep['image_url']); ?>"
+                             alt="<?php echo esc_attr($sep['title'] ?? ''); ?>"
+                             loading="lazy" decoding="async">
+                    </a>
+                <?php else: ?>
+                    <img src="<?php echo esc_url($sep['image_url']); ?>"
+                         alt="<?php echo esc_attr($sep['title'] ?? ''); ?>"
+                         loading="lazy" decoding="async">
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+add_shortcode('merkahorro_separatas', 'merkahorro_separatas_shortcode');
+
+
+// ═══════════════════════════════════════════════
+// PÁGINA DE DESCUENTO DINÁMICA: /promo/descuento/{id}/
+// Cuando un banner de descuento lleva a esta URL,
+// WordPress muestra los productos que aplican para esa regla.
+// Requiere: Ajustes → Permalinks → guardar (para registrar la rewrite rule)
+// ═══════════════════════════════════════════════
+add_action('init', function() {
+    // Registrar regla de reescritura: /promo/descuento/123/
+    add_rewrite_rule(
+        '^promo/descuento/([0-9]+)/?$',
+        'index.php?merkahorro_promo_id=$matches[1]',
+        'top'
+    );
+});
+
+add_filter('query_vars', function($vars) {
+    $vars[] = 'merkahorro_promo_id';
+    return $vars;
+});
+
+add_action('template_redirect', function() {
+    $promo_id = get_query_var('merkahorro_promo_id');
+    if (!$promo_id) return;
+
+    $promo_id = absint($promo_id);
+
+    // Obtener la regla de descuento desde la API del Gestor
+    $url      = MERKAHORRO_API_URL . '/content/discounts/' . $promo_id;
+    $response = wp_remote_get($url, array('timeout' => 10, 'sslverify' => false));
+
+    $rule = null;
+    if (!is_wp_error($response)) {
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        if (!empty($body['ok']) && !empty($body['data'])) {
+            $rule = $body['data'];
+        }
+    }
+
+    // ── Validar que la regla aplica a esta sede ──
+    // Cada WordPress es independiente por subdominio, así que verificamos
+    // que la regla tenga sedes=null (todas) o incluya la sede actual.
+    $current_sede = merkahorro_get_current_sede();
+    $rule_sedes   = $rule['sedes'] ?? null;
+
+    if ($rule !== null && !empty($rule_sedes) && is_array($rule_sedes)) {
+        if ($current_sede && !in_array($current_sede, $rule_sedes, true)) {
+            // Esta promo no aplica para este subdominio — redirigir a la tienda
+            wp_redirect(wc_get_page_permalink('shop') ?: home_url('/'));
+            exit;
+        }
+    }
+
+    // ── Validar que la regla esté activa ──
+    if ($rule !== null && empty($rule['active'])) {
+        wp_redirect(wc_get_page_permalink('shop') ?: home_url('/'));
+        exit;
+    }
+
+    // Fallback: mostrar página sin regla
+    $rule_title      = $rule['title'] ?? 'Productos en Promoción';
+    $applies_to      = $rule['applies_to'] ?? 'all';
+    $applies_to_ids  = $rule['applies_to_ids'] ?? array();
+    $discount_type   = $rule['discount_type'] ?? 'percentage';
+    $discount_value  = $rule['discount_value'] ?? 0;
+
+    // Construir badge de descuento para el título
+    if ($discount_type === 'percentage') {
+        $badge_str = $discount_value . '% OFF';
+    } else {
+        $badge_str = '$' . number_format($discount_value, 0, ',', '.') . ' de descuento';
+    }
+
+    // Construir shortcode de WooCommerce [products] con IDs o categorías
+    $products_shortcode = '';
+    if ($applies_to === 'products' && !empty($applies_to_ids)) {
+        $ids_str = implode(',', array_map('absint', $applies_to_ids));
+        $products_shortcode = do_shortcode('[products ids="' . $ids_str . '" columns="4" limit="40" orderby="date"]');
+    } elseif ($applies_to === 'categories' && !empty($applies_to_ids)) {
+        $cat_slugs = array();
+        foreach ($applies_to_ids as $cat_id) {
+            $term = get_term(absint($cat_id), 'product_cat');
+            if ($term && !is_wp_error($term)) {
+                $cat_slugs[] = $term->slug;
+            }
+        }
+        if (!empty($cat_slugs)) {
+            $cat_str = implode(',', $cat_slugs);
+            $products_shortcode = do_shortcode('[products category="' . $cat_str . '" columns="4" limit="40" orderby="date"]');
+        }
+    } else {
+        // all — mostrar destacados con descuento activo
+        $products_shortcode = do_shortcode('[products on_sale="true" columns="4" limit="40" orderby="date"]');
+    }
+
+    // Renderizar la página
+    ?>
+    <!DOCTYPE html>
+    <html <?php language_attributes(); ?>>
+    <head>
+        <meta charset="<?php bloginfo('charset'); ?>">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title><?php echo esc_html($rule_title); ?> — <?php bloginfo('name'); ?></title>
+        <?php wp_head(); ?>
+        <style>
+            .mks-promo-hero {
+                background: #160857;
+                color: #fff;
+                padding: 28px 20px 22px;
+                text-align: center;
+                margin-bottom: 32px;
+            }
+            .mks-promo-hero h1 { margin: 0 0 8px; font-size: 1.8rem; }
+            .mks-promo-badge {
+                display: inline-block;
+                background: #88dc00;
+                color: #160857;
+                font-weight: 800;
+                font-size: 1.1rem;
+                padding: 6px 18px;
+                border-radius: 20px;
+                margin-top: 8px;
+            }
+            .mks-promo-back {
+                display: inline-block;
+                margin-bottom: 20px;
+                color: #160857;
+                font-size: 0.9rem;
+                text-decoration: none;
+            }
+            .mks-promo-back:hover { text-decoration: underline; }
+            .mks-promo-products { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
+        </style>
+    </head>
+    <body <?php body_class(); ?>>
+        <?php wp_body_open(); ?>
+
+        <div class="mks-promo-hero">
+            <h1><?php echo esc_html($rule_title); ?></h1>
+            <?php if ($discount_value > 0): ?>
+                <div class="mks-promo-badge"><?php echo esc_html($badge_str); ?></div>
+            <?php endif; ?>
+        </div>
+
+        <div class="mks-promo-products">
+            <a class="mks-promo-back" href="<?php echo esc_url(wc_get_page_permalink('shop')); ?>">
+                ← Volver a la tienda
+            </a>
+            <?php if (!empty($products_shortcode)): ?>
+                <?php echo $products_shortcode; ?>
+            <?php else: ?>
+                <p>No hay productos disponibles para esta promoción en este momento.</p>
+            <?php endif; ?>
+        </div>
+
+        <?php wp_footer(); ?>
+    </body>
+    </html>
+    <?php
+    exit;
+});
+
+// Flush rewrite rules al activar el mu-plugin (solo se hace una vez)
+add_action('wp_loaded', function() {
+    if (get_option('merkahorro_promo_rewrite_flushed') !== '1') {
+        flush_rewrite_rules();
+        update_option('merkahorro_promo_rewrite_flushed', '1');
+    }
+});

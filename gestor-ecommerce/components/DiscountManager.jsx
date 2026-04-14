@@ -49,6 +49,7 @@ const EMPTY_FORM = {
   badge_text: "",
   badge_bg_color: "#160857",
   badge_text_color: "#88dc00",
+  priority: 50,
 };
 
 /**
@@ -106,6 +107,14 @@ function parseMoneyValue(val) {
   }
   const num = parseFloat(clean);
   return isNaN(num) ? 0 : Math.round(num); // Redondear a entero (pesos colombianos)
+}
+
+/**
+ * Retorna la prioridad de una regla (menor = más importante).
+ * Default 50 para reglas sin prioridad asignada.
+ */
+function getPriority(rule) {
+  return rule.priority ?? 50;
 }
 
 export default function DiscountManager({ sedes = [], sedeActual = null, esAdminGlobal = false }) {
@@ -402,18 +411,43 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       const results = [];
       for (const code of syncSedes) {
         const url = SEDE_WP_URLS[code];
-        // Filtrar reglas que aplican a esta sede (sedes=null → todas, o que incluya el code)
-        const sedeRules = activeRules.filter(r => !r.sedes || r.sedes.includes(code));
+        // Filtrar reglas que aplican a ESTA sede (sedes=null → todas, o que incluya el code)
+        let sedeRules = activeRules
+          .filter(r => !r.sedes || r.sedes.includes(code))
+          .sort((a, b) => getPriority(a) - getPriority(b)); // mayor prioridad primero
+
+        // IDs bloqueados por separatas activas HOY en ESTA sede específica
+        const sedeSeparatas = sedeRules.filter(r =>
+          getPriority(r) === 1 && r.discount_type === 'value_discount' && isActiveToday(r)
+        );
+        const separataProductIds = new Set(
+          sedeSeparatas.flatMap(r => (r.applies_to_ids || []).map(id => String(id)))
+        );
+
+        // Para reglas semanales (P10), excluir productos cubiertos por separatas de ESTA sede
+        if (separataProductIds.size > 0) {
+          sedeRules = sedeRules.map(rule => {
+            if (getPriority(rule) !== 10 || rule.applies_to !== 'products') return rule;
+            const filteredIds = (rule.applies_to_ids || []).filter(id => !separataProductIds.has(String(id)));
+            const filteredNames = (rule.applies_to_names || []).filter((_, i) =>
+              !separataProductIds.has(String((rule.applies_to_ids || [])[i]))
+            );
+            return { ...rule, applies_to_ids: filteredIds, applies_to_names: filteredNames };
+          });
+        }
         try {
           const r = await syncDiscountRulesToWP(url, sedeRules);
-          results.push({ code, ok: r.ok, synced: r.synced || 0, total: sedeRules.length });
+          results.push({ code, ok: r.ok, synced: r.synced || 0, total: sedeRules.length, separatasCount: separataProductIds.size });
         } catch {
-          results.push({ code, ok: false, synced: 0, total: sedeRules.length });
+          results.push({ code, ok: false, synced: 0, total: sedeRules.length, separatasCount: 0 });
         }
       }
       const ok = results.filter(r => r.ok);
       const fail = results.filter(r => !r.ok);
-      const detail = ok.map(r => `  ✅ ${SEDE_LABELS[r.code] || r.code}: ${r.total} regla(s)`).join('\n');
+      const detail = ok.map(r =>
+        `  ✅ ${SEDE_LABELS[r.code] || r.code}: ${r.total} regla(s)` +
+        (r.separatasCount > 0 ? ` (⭐ ${r.separatasCount} prod. excluidos de semanal)` : '')
+      ).join('\n');
       if (fail.length === 0) {
         alert(`Sincronización exitosa en ${ok.length} sede(s):\n\n${detail}\n\nEl plugin FlyCart ya las está aplicando.\nLa configuración de badges se preservó.`);
       } else {
@@ -491,6 +525,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       badge_text: rule.badge_text || "",
       badge_bg_color: rule.badge_bg_color || "#160857",
       badge_text_color: rule.badge_text_color || "#88dc00",
+      priority: rule.priority ?? 50,
     });
     setShowForm(true);
   };
@@ -642,18 +677,50 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     } catch (err) { console.error(err); }
   };
 
-  // --- Aplicar sale_price en WooCommerce (botón $) ---
   const handleApplyValueDiscounts = async (rule) => {
     if (!rule.product_discounts?.length) { alert("Esta regla no tiene productos con descuento."); return; }
     const productsWithDiscount = rule.product_discounts.filter(pd => pd.discount_amount > 0);
     if (productsWithDiscount.length === 0) { alert("Ningún producto tiene valor de descuento > 0."); return; }
     const targetSedes = rule.sedes || Object.keys(SEDE_WP_URLS);
 
+    // ── Prioridad: detectar productos bloqueados por reglas de mayor prioridad activas hoy EN LAS MISMAS SEDES
+    const higherPriorityActive = rules.filter(r =>
+      r.id !== rule.id && r.active &&
+      r.discount_type === 'value_discount' &&
+      getPriority(r) < getPriority(rule) && isActiveToday(r) &&
+      sharesAnySedeWith(r, rule)  // solo bloquea si comparte sede con esta regla
+    );
+    const lockedKeys = new Set(
+      higherPriorityActive.flatMap(r =>
+        (r.product_discounts || []).map(pd => `${pd.sku}|${pd.variation || ''}`)
+      )
+    );
+    const toApply = lockedKeys.size > 0
+      ? productsWithDiscount.filter(pd => !lockedKeys.has(`${pd.sku}|${pd.variation || ''}`))
+      : productsWithDiscount;
+    const skipped = lockedKeys.size > 0
+      ? productsWithDiscount.filter(pd => lockedKeys.has(`${pd.sku}|${pd.variation || ''}`))
+      : [];
+
+    if (toApply.length === 0 && skipped.length > 0) {
+      const blockedByRules = [...new Set(higherPriorityActive.map(r => `"${r.title}" (P${getPriority(r)})`))].join(', ');
+      alert(
+        `⚠️ Todos los productos de esta regla están cubiertos por reglas de mayor prioridad.\n\n` +
+        `Bloqueados por: ${blockedByRules}\n\n` +
+        `Productos (${skipped.length}):\n` + skipped.slice(0, 10).map(pd => `  • ${pd.sku}${pd.variation ? ` [${pd.variation}]` : ''}`).join('\n') +
+        (skipped.length > 10 ? `\n  ...y ${skipped.length - 10} más` : '') +
+        `\n\nSi quieres forzar este descuento sobre esos productos, sube la prioridad de esta regla.`
+      );
+      return;
+    }
     const today = new Date().toISOString().split('T')[0];
     const hasFutureStart = rule.schedule_type === 'date_range' && rule.date_start && rule.date_start > today;
     const hasDateRange = rule.schedule_type === 'date_range' && rule.date_start && rule.date_end;
 
-    let confirmMsg = `¿Pre-programar sale_price en ${productsWithDiscount.length} productos × ${targetSedes.length} sedes?`;
+    let confirmMsg = `¿Pre-programar sale_price en ${toApply.length} productos × ${targetSedes.length} sedes?`;
+    if (skipped.length > 0) {
+      confirmMsg += `\n\n⚠️ ${skipped.length} producto(s) omitidos por tener una regla de mayor prioridad activa hoy.`;
+    }
     if (hasFutureStart) {
       confirmMsg += `\n\n📅 Inicio programado: ${rule.date_start}\n📅 Fin programado: ${rule.date_end}\n\nWooCommerce respetará estas fechas — el precio tachado aparecerá AUTOMÁTICAMENTE el ${rule.date_start} y desaparecerá el ${rule.date_end}.\n\nPuedes hacer clic en $ hoy y WooCommerce no mostrará el tachado hasta el ${rule.date_start}.`;
     } else if (hasDateRange) {
@@ -667,7 +734,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       setApplyingDiscounts(true);
       setApplyResults(null);
       const res = await applyValueDiscounts({
-        product_discounts: productsWithDiscount,
+        product_discounts: toApply,
         sedes: targetSedes,
         date_from: rule.date_start || null,
         date_to: rule.date_end || null,
@@ -678,7 +745,17 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         const datesMsg = hasFutureStart
           ? `\n\n🗓️ El precio tachado aparecerá en la tienda el ${rule.date_start}.`
           : '';
-        alert(`Descuentos programados en WooCommerce.\n\n✅ ${s.success || 0} exitoso(s)\n❌ ${s.failed || 0} fallido(s)\n📦 ${targetSedes.length} sede(s)${datesMsg}`);
+        const skippedMsg = skipped.length > 0
+          ? `\n\n⏭️ ${skipped.length} omitidos por prioridad (cubiertos por otra regla activa).`
+          : '';
+        // Mostrar productos fallidos con detalle
+        const failedItems = (res.results || []).filter(r => !r.ok);
+        const uniqueFailed = [...new Map(failedItems.map(r => [r.sku + (r.variation || ''), r])).values()];
+        const failDetail = uniqueFailed.length > 0
+          ? `\n\n❌ Fallidos (${uniqueFailed.length}):\n` + uniqueFailed.slice(0, 10).map(r => `  • ${r.sku}${r.variation ? ` [${r.variation}]` : ''}: ${r.message || 'error'}`).join('\n')
+            + (uniqueFailed.length > 10 ? `\n  ...y ${uniqueFailed.length - 10} más` : '')
+          : '';
+        alert(`Descuentos programados en WooCommerce.\n\n✅ ${s.success || 0} exitoso(s)\n❌ ${s.failed || 0} fallido(s)\n📦 ${targetSedes.length} sede(s)${datesMsg}${skippedMsg}${failDetail}`);
       } else {
         alert("Error aplicando descuentos: " + (res.message || "Error desconocido"));
       }
@@ -738,10 +815,29 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     return false;
   };
 
-  const activeToday = rules.filter(isActiveToday);
-  const activeCount = rules.filter(r => r.active).length;
+  // Helper: comprueba si dos reglas comparten al menos una sede
+  const sharesAnySedeWith = (ruleA, ruleB) => {
+    if (!ruleA.sedes || !ruleB.sedes) return true; // una de las dos aplica a todas
+    return ruleA.sedes.some(s => ruleB.sedes.includes(s));
+  };
 
-  // Filtrar reglas visibles según rol
+  // Cuenta cuántos productos de una regla están "bloqueados" por reglas de mayor prioridad activas hoy EN LA MISMA SEDE
+  const getConflictCount = (rule) => {
+    if (rule.discount_type !== 'value_discount') return 0;
+    const pds = rule.product_discounts || [];
+    if (pds.length === 0) return 0;
+    const higherActive = rules.filter(r =>
+      r.id !== rule.id && r.active &&
+      r.discount_type === 'value_discount' &&
+      getPriority(r) < getPriority(rule) && isActiveToday(r) &&
+      sharesAnySedeWith(r, rule)  // solo cuenta si aplica a la misma sede
+    );
+    if (higherActive.length === 0) return 0;
+    const lockedKeys = new Set(
+      higherActive.flatMap(r => (r.product_discounts || []).map(pd => `${pd.sku}|${pd.variation || ''}`))
+    );
+    return pds.filter(pd => lockedKeys.has(`${pd.sku}|${pd.variation || ''}`)).length;
+  };
   const visibleRules = esAdminGlobal
     ? rules
     : rules.filter(r => !r.sedes || r.sedes.includes(userSedeCode));
@@ -1006,6 +1102,26 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                     <span className="dm-toggle-slider"></span>
                     <span className="dm-toggle-label">Regla activa</span>
                   </label>
+
+                  {/* Prioridad */}
+                  <div className="ge-form-group" style={{ marginTop: 16 }}>
+                    <label>Tipo de regla <span className="ge-form-help">— define qué descuento prevalece cuando un producto aparece en ambas</span></label>
+                    <div className="dm-priority-grid">
+                      {[
+                        { value: 1,  label: '⭐ Separata',  desc: 'Tiene precedencia sobre el descuento semanal. Úsala para promociones de separata.' },
+                        { value: 10, label: '🗓️ Semanal',   desc: 'Descuento recurrente por día de la semana. La separata lo sobrescribe si coincide.' },
+                      ].map(opt => (
+                        <div
+                          key={opt.value}
+                          className={`dm-priority-card ${form.priority === opt.value ? 'active' : ''}`}
+                          onClick={() => setForm(f => ({ ...f, priority: opt.value }))}
+                        >
+                          <div className="dm-priority-card-label">{opt.label}</div>
+                          <div className="dm-priority-card-desc">{opt.desc}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1416,6 +1532,29 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
 
                 <div className="ge-rule-status">
                   {activeNow && <span className="ge-badge running">Ejecutándose</span>}
+                  {(() => {
+                    const p = getPriority(rule);
+                    const isHigh = p <= 5;
+                    return (
+                      <span
+                        className={`dm-priority-badge ${isHigh ? 'high' : p <= 10 ? 'mid' : 'low'}`}
+                        title={`Prioridad ${p} — ${isHigh ? 'Separata/Especial' : p <= 10 ? 'Semanal/Normal' : 'Base'}`}
+                      >
+                        {isHigh ? '⭐' : p <= 10 ? '🗓️' : ''} P{p}
+                      </span>
+                    );
+                  })()}
+                  {(() => {
+                    const cc = getConflictCount(rule);
+                    return cc > 0 ? (
+                      <span
+                        className="dm-conflict-badge"
+                        title={`${cc} producto(s) de esta regla están cubiertos hoy por reglas de mayor prioridad`}
+                      >
+                        ⚠️ {cc} conflicto{cc > 1 ? 's' : ''}
+                      </span>
+                    ) : null;
+                  })()}
                   <span className={`ge-badge ${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Activa' : 'Inactiva'}</span>
                 </div>
 

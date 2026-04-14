@@ -208,15 +208,45 @@ async function resolveSingleProduct(client, sedeCode, pd) {
                 } catch (e) { /* fallback to SKU search */ }
             }
 
-            // Buscar por SKU
+            // Buscar por SKU base (del padre)
             if (!productId) {
                 const searchRes = await client.get("/products", {
-                    params: { sku, per_page: 1, _fields: "id,sku,price,regular_price,type" }
+                    params: { sku, per_page: 1, _fields: "id,sku,price,regular_price,type,parent_id" }
                 });
                 if (searchRes.data.length > 0) {
                     productData = searchRes.data[0];
                     productId = productData.id;
                 }
+            }
+
+            // Fallback: buscar por SKU completo (base + variación), ej: "11422P6"
+            // Necesario cuando el padre no tiene SKU propio y solo las variaciones tienen SKU
+            if (!productId && variation) {
+                const fullSku = String(sku).trim().toUpperCase() + String(variation).trim().toUpperCase();
+                try {
+                    const fullSkuRes = await client.get("/products", {
+                        params: { sku: fullSku, per_page: 1, _fields: "id,sku,price,regular_price,type,parent_id" }
+                    });
+                    if (fullSkuRes.data.length > 0) {
+                        productData = fullSkuRes.data[0];
+                        productId = productData.id;
+                        console.log(`🔍 [${sedeCode}] SKU base "${sku}" no encontrado, halló por SKU completo "${fullSku}" (id=${productId})`);
+                    }
+                } catch (e) { /* ignorar, se marcará como no encontrado abajo */ }
+            }
+
+            // Fallback adicional: si el SKU base encontró una VARIACIÓN en vez del padre
+            // (puede ocurrir si WooCommerce devuelve la variación directamente)
+            // Intentar obtener el padre por el campo parent_id
+            if (productId && productData?.parent_id > 0) {
+                try {
+                    const parentRes = await client.get(`/products/${productData.parent_id}`, {
+                        params: { _fields: "id,sku,price,regular_price,type" }
+                    });
+                    productId = productData.parent_id;
+                    productData = parentRes.data;
+                    console.log(`🔍 [${sedeCode}] Redirigido a padre id=${productId} desde variación detectada`);
+                } catch (e) { /* mantener el ID original si falla */ }
             }
 
 
@@ -287,7 +317,17 @@ async function resolveSingleProduct(client, sedeCode, pd) {
             }
 
             if (!matchedVar) {
-                return [{ ...pd, ok: false, message: `Variación ${variation} no encontrada` }];
+                // Último intento: variación cuyo SKU sea exactamente (sku+variation) o contenga variation
+                matchedVar = variations.find(v => {
+                    if (!v.sku) return false;
+                    const vSku = v.sku.toUpperCase().replace(/[\s-_]/g, '');
+                    const target = (String(sku) + String(variation)).toUpperCase().replace(/[\s-_]/g, '');
+                    return vSku === target;
+                });
+            }
+
+            if (!matchedVar) {
+                return [{ ...pd, ok: false, message: `Variación ${variation} no encontrada en producto ${productId} (${sku}). SKUs disponibles: ${variations.slice(0, 5).map(v => v.sku || 'sin-sku').join(', ')}` }];
             }
 
             const varRegularPrice = Number(matchedVar.regular_price) || Number(matchedVar.price) || 0;

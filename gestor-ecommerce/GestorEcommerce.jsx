@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FaArrowLeft, FaChartBar, FaBoxOpen, FaSearchDollar, FaImages, FaTags, FaCog, FaTruck } from 'react-icons/fa';
+import { FaArrowLeft, FaBoxOpen, FaSearchDollar, FaImages, FaTags, FaCog, FaTruck, FaBell } from 'react-icons/fa';
 import LiveComparison from './components/LiveComparison';
-import DashboardGestorEcommerce from './components/DashboardGestorEcommerce';
 import CatalogManager from './CatalogManager';
 import BannerManager from './components/BannerManager';
 import DiscountManager from './components/DiscountManager';
 import LogisticsManager from './components/LogisticsManager';
+import AWDRManager from './components/AWDRManager';
 import { fetchSedes } from './services';
 import './GestorEcommerce.css';
 
 const GestorEcommerce = () => {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('catalog');
   const [sedes, setSedes] = useState([]);
   const [sedeActual, setSedeActual] = useState(null);
   const [loadingSedes, setLoadingSedes] = useState(true);
@@ -63,8 +63,6 @@ const GestorEcommerce = () => {
     }
 
     switch (activeTab) {
-      case 'dashboard':
-        return <DashboardGestorEcommerce setActiveTab={setActiveTab} sedeInfo={sedeActual} />;
       case 'catalog':
         return <CatalogManager sedeInfo={sedeActual} sedes={sedes} />;
       case 'audit':
@@ -75,10 +73,12 @@ const GestorEcommerce = () => {
         return <DiscountManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'logistics':
         return <LogisticsManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
+      case 'awdr':
+        return <AWDRManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'settings':
         return <div className="ge-card ge-empty">Configuración en construcción...</div>;
       default:
-        return <DashboardGestorEcommerce setActiveTab={setActiveTab} sedeInfo={sedeActual} />;
+        return <CatalogManager sedeInfo={sedeActual} sedes={sedes} />;
     }
   };
 
@@ -120,9 +120,6 @@ const GestorEcommerce = () => {
 
         <nav className="ge-sidebar-nav">
           <div className="ge-nav-label">GENERAL</div>
-          <button className={`ge-nav-button ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('dashboard')}>
-            <FaChartBar /> <span>Dashboard</span>
-          </button>
           <button className={`ge-nav-button ${activeTab === 'catalog' ? 'active' : ''}`} onClick={() => navigate('catalog')}>
             <FaBoxOpen /> <span>Catálogo</span>
           </button>
@@ -143,6 +140,9 @@ const GestorEcommerce = () => {
           <div className="ge-nav-label spacer">OPERACIONES</div>
           <button className={`ge-nav-button ${activeTab === 'logistics' ? 'active' : ''}`} onClick={() => navigate('logistics')}>
             <FaTruck /> <span>Logística</span>
+          </button>
+          <button className={`ge-nav-button ${activeTab === 'awdr' ? 'active' : ''}`} onClick={() => navigate('awdr')}>
+            <FaBell /> <span>Avisos AWDR</span>
           </button>
 
           <div className="ge-nav-label spacer">SISTEMA</div>

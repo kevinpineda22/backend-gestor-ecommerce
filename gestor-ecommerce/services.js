@@ -11,11 +11,6 @@ export async function fetchSedes() {
     return res.json();
 }
 
-export async function fetchDashboardStats() {
-    const res = await fetch(`${API_URL}/catalog/dashboard-stats`);
-    return res.json();
-}
-
 export async function fetchLiveComparison({ sede, page = 1, item = "", limit = 20, filter = 'all' }) {
   const params = new URLSearchParams({
     sede: sede || "PV001",
@@ -282,6 +277,38 @@ export async function saveLogisticsConfig(sedeCode, config) {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config)
+  });
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════════
+// AWDR — Avisos de Descuento (AWDR Subtotal Excluding Filter)
+// ═══════════════════════════════════════════════════
+
+/** Diagnóstico de conexión AWDR para una sede */
+export async function awdrDiagnostic(sedeCode) {
+  const res = await fetch(`${API_URL}/awdr/${sedeCode}/diagnostic`);
+  return res.json();
+}
+
+/** Leer configuración global + por regla de una sede */
+export async function awdrGetSettings(sedeCode) {
+  const res = await fetch(`${API_URL}/awdr/${sedeCode}/settings`);
+  return res.json();
+}
+
+/** Leer reglas visibles de Discount Rules de una sede */
+export async function awdrGetRules(sedeCode) {
+  const res = await fetch(`${API_URL}/awdr/${sedeCode}/rules`);
+  return res.json();
+}
+
+/** Guardar configuración (globals y/o rules) en una sede */
+export async function awdrPostSettings(sedeCode, payload) {
+  const res = await fetch(`${API_URL}/awdr/${sedeCode}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
   return res.json();
 }

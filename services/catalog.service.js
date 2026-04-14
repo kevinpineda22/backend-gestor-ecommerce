@@ -4,29 +4,6 @@ import wooApi from "./woo.service.js";
 import { getLivePriceForItem, getAllPricesForItem } from "./siesa/siesa.prices.js";
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
 
-export async function getCatalogStats() {
-    // Ejecutar conteos en paralelo
-    const [
-        { count: totalCount },
-        { count: activeCount },
-        { count: draftCount },
-        { count: noImageCount } // Productos sin imagen (calidad)
-    ] = await Promise.all([
-        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }),
-        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).eq("ecommerce_active", true),
-        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).eq("woo_status", "draft"),
-        supabase.from("ecommerce_products").select("*", { count: "exact", head: true }).is("image_url", null)
-    ]);
-
-    return {
-        total_products: totalCount || 0,
-        active_products: activeCount || 0,
-        draft_products: draftCount || 0,
-        missing_images: noImageCount || 0
-    };
-}
-
-
 export async function debugSkuStatus(sku) {
   const report = {
     checked_sku: sku,

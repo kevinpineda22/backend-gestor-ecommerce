@@ -1,12 +1,11 @@
 import express from "express";
 import multer from "multer";
-import { listCatalog, toggleItem, adoptWooProducts, liveCompare, priceDiffReport, debugItem, updateProduct, listCategories, createCategory, getProductDetail, listVariations, updateVariationImage, syncVariationPrice, listTags, createTag, deleteTag, createNewProduct, getWooDetailsBatch, getDashboardStats, getSedes } from "../controllers/catalog.controller.js";
+import { listCatalog, toggleItem, adoptWooProducts, liveCompare, priceDiffReport, debugItem, updateProduct, listCategories, createCategory, getProductDetail, listVariations, updateVariationImage, syncVariationPrice, listTags, createTag, deleteTag, createNewProduct, getWooDetailsBatch, getSedes } from "../controllers/catalog.controller.js";
 import { uploadImage } from "../controllers/upload.controller.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.get("/dashboard-stats", getDashboardStats);
 router.get("/sedes", getSedes);
 router.post("/woo-details", getWooDetailsBatch); // Nueva ruta para enriquecer tabla
 router.post("/upload", upload.single("image"), uploadImage);

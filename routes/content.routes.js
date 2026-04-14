@@ -57,6 +57,21 @@ router.get('/discounts', async (req, res) => {
     }
 });
 
+// GET /api/content/discounts/:id — usada por el plugin WP para la página /promo/descuento/{id}/
+router.get('/discounts/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) return res.status(400).json({ ok: false, message: 'ID inválido' });
+        const result = await contentService.getDiscountRules();
+        if (!result.ok) return res.status(500).json(result);
+        const rule = (result.data || []).find(r => r.id === id);
+        if (!rule) return res.status(404).json({ ok: false, message: 'Regla no encontrada' });
+        res.json({ ok: true, data: rule });
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
 // POST /api/content/discounts/apply-value-discounts
 // Aplica sale_price directamente en WooCommerce para descuentos tipo "value_discount"
 router.post('/discounts/apply-value-discounts', async (req, res) => {

@@ -508,14 +508,13 @@ export async function getSalesStats(period = "month") {
     // Si pedimos 'month', suele venir 1 objeto con el acumulado del mes, o array de dias si pedimos rango.
     // woocommerce /reports/sales devuelve array.
     if (response.data && response.data.length > 0) {
-      // Tomamos el último (o el sumatorio)
       const report = response.data[0];
       return {
-        total_sales: report.total_sales,
-        net_sales: report.net_sales,
-        average_sales: report.average_sales,
-        total_orders: report.total_orders,
-        total_items: report.total_items,
+        total_sales: Number(report.total_sales) || 0,
+        net_sales: Number(report.net_sales) || 0,
+        average_sales: Number(report.average_sales) || 0,
+        total_orders: Number(report.total_orders) || 0,
+        total_items: Number(report.total_items) || 0,
       };
     }
     return null;
