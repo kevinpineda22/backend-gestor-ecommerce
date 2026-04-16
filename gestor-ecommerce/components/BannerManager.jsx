@@ -60,14 +60,16 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
   const loadAllBanners = async () => {
     setLoading(true);
     try {
-      // Cargar ambas secciones en paralelo
-      const [sliderRes, tilesRes] = await Promise.all([
+      // Cargar todas las secciones en paralelo
+      const [sliderRes, tilesRes, separatasRes] = await Promise.all([
         fetchBanners("home_slider"),
-        fetchBanners("home_tiles")
+        fetchBanners("home_tiles"),
+        fetchBanners("promo_separatas"),
       ]);
       const combined = [
         ...(sliderRes.ok ? sliderRes.data || [] : []),
-        ...(tilesRes.ok ? tilesRes.data || [] : [])
+        ...(tilesRes.ok ? tilesRes.data || [] : []),
+        ...(separatasRes.ok ? separatasRes.data || [] : []),
       ];
       setAllBanners(combined);
     } catch (err) {

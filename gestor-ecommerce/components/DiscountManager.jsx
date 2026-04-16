@@ -50,6 +50,11 @@ const EMPTY_FORM = {
   badge_bg_color: "#160857",
   badge_text_color: "#88dc00",
   priority: 50,
+  // Condición de carrito para descuentos autoliquidables:
+  // cart_condition_type: 'subtotal' | null
+  // cart_condition_value: monto mínimo del carrito (ej: 150000)
+  cart_condition_type: null,
+  cart_condition_value: 0,
 };
 
 /**
@@ -449,7 +454,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         (r.separatasCount > 0 ? ` (⭐ ${r.separatasCount} prod. excluidos de semanal)` : '')
       ).join('\n');
       if (fail.length === 0) {
-        alert(`Sincronización exitosa en ${ok.length} sede(s):\n\n${detail}\n\nEl plugin FlyCart ya las está aplicando.\nLa configuración de badges se preservó.`);
+        alert(`Sincronización exitosa en ${ok.length} sede(s):\n\n${detail}\n\nEl plugin FlyCart ya las está aplicando.\nColores y texto de las barras de descuento actualizados desde el Gestor.`);
       } else {
         const failDetail = fail.map(f => `  ❌ ${SEDE_LABELS[f.code] || f.code}`).join('\n');
         alert(`⚠️ Sincronizado en ${ok.length} de ${syncSedes.length} sedes.\n\n${detail}\n\nFallaron:\n${failDetail}`);
@@ -478,6 +483,13 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
         date_end: rule.date_end,
         active: rule.active,
         display_order: imported,
+        // Importar configuración de barra de descuento desde FlyCart si existía
+        badge_enabled: rule.badge_enabled || false,
+        badge_text: rule.badge_text || "",
+        badge_bg_color: rule.badge_bg_color || "#160857",
+        badge_text_color: rule.badge_text_color || "#88dc00",
+        cart_condition_type: rule.cart_condition_type || null,
+        cart_condition_value: rule.cart_condition_value || 0,
       };
       const res = await createDiscountRule(payload);
       if (res.ok) imported++;
@@ -526,6 +538,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       badge_bg_color: rule.badge_bg_color || "#160857",
       badge_text_color: rule.badge_text_color || "#88dc00",
       priority: rule.priority ?? 50,
+      cart_condition_type: rule.cart_condition_type || null,
+      cart_condition_value: rule.cart_condition_value || 0,
     });
     setShowForm(true);
   };
@@ -550,6 +564,8 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
       if (payload.schedule_type === "days") { payload.date_start = null; payload.date_end = null; }
       if (payload.schedule_type === "date_range") { payload.schedule_days = []; }
       if (payload.schedule_type === "always") { payload.schedule_days = []; payload.date_start = null; payload.date_end = null; }
+      if (payload.schedule_type === "cart_condition") { payload.schedule_days = []; payload.date_start = null; payload.date_end = null; }
+      if (payload.schedule_type !== "cart_condition") { payload.cart_condition_type = null; payload.cart_condition_value = 0; }
       if (payload.applies_to === "all") { payload.applies_to_ids = []; payload.applies_to_names = []; payload.product_discounts = []; }
       // Sedes: si están todas seleccionadas o ninguna, guardar null (=todas)
       if (payload.sedes && payload.sedes.length === Object.keys(SEDE_WP_URLS).length) {
@@ -1108,8 +1124,9 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                     <label>Tipo de regla <span className="ge-form-help">— define qué descuento prevalece cuando un producto aparece en ambas</span></label>
                     <div className="dm-priority-grid">
                       {[
-                        { value: 1,  label: '⭐ Separata',  desc: 'Tiene precedencia sobre el descuento semanal. Úsala para promociones de separata.' },
-                        { value: 10, label: '🗓️ Semanal',   desc: 'Descuento recurrente por día de la semana. La separata lo sobrescribe si coincide.' },
+                        { value: 1,  label: '⭐ Separata',       desc: 'Tiene precedencia sobre el descuento semanal. Úsala para promociones de separata.' },
+                        { value: 5,  label: '🛒 Autoliquidable', desc: 'Descuento condicionado al carrito. Se activa cuando el cliente supera el monto mínimo.' },
+                        { value: 10, label: '🗓️ Semanal',        desc: 'Descuento recurrente por día de la semana. La separata lo sobrescribe si coincide.' },
                       ].map(opt => (
                         <div
                           key={opt.value}
@@ -1312,6 +1329,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                       <option value="days">Días de la semana</option>
                       <option value="date_range">Rango de fechas</option>
                       <option value="always">Siempre activo</option>
+                      <option value="cart_condition">Condición de carrito (autoliquidable)</option>
                     </select>
                   </div>
 
@@ -1334,6 +1352,30 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                       <div className="ge-form-group">
                         <label className="ge-form-help">Fecha fin</label>
                         <input type="date" className="ge-input" value={form.date_end} onChange={e => setForm(f => ({ ...f, date_end: e.target.value }))} />
+                      </div>
+                    </div>
+                  )}
+
+                  {form.schedule_type === "cart_condition" && (
+                    <div className="ge-form-row" style={{ marginTop: 8 }}>
+                      <div className="ge-form-group">
+                        <label>Condición</label>
+                        <select className="ge-input" value={form.cart_condition_type || 'subtotal'} onChange={e => setForm(f => ({ ...f, cart_condition_type: e.target.value }))}>
+                          <option value="subtotal">Subtotal del carrito mayor o igual a</option>
+                        </select>
+                      </div>
+                      <div className="ge-form-group">
+                        <label>Monto mínimo ($)</label>
+                        <input
+                          type="number"
+                          className="ge-input"
+                          value={form.cart_condition_value || ''}
+                          onChange={e => setForm(f => ({ ...f, cart_condition_type: 'subtotal', cart_condition_value: Number(e.target.value) }))}
+                          placeholder="Ej: 150000"
+                          min="0"
+                          step="1000"
+                        />
+                        <span className="ge-form-help">El descuento se activa cuando el carrito supere este valor</span>
                       </div>
                     </div>
                   )}

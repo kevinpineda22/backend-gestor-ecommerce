@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import "./CatalogManager.css";
 
 export default function ProductEditModal({ 
@@ -174,14 +174,77 @@ export default function ProductEditModal({
     closeResizePanel();
   };
 
+  // ── Mapas O(1) para lookup instantáneo de categorías y tags ──
+  const categoryMap = useMemo(() => {
+    const m = new Map();
+    categories.forEach(c => m.set(String(c.id), c));
+    return m;
+  }, [categories]);
+
+  const tagMap = useMemo(() => {
+    const m = new Map();
+    tags.forEach(t => m.set(String(t.id), t));
+    return m;
+  }, [tags]);
+
+  // ── Listas base (se recomputan solo cuando cambia `categories`) ──
+  const groupCats = useMemo(
+    () => categories.filter(c => c.parent === 0).sort((a, b) => a.name.localeCompare(b.name)),
+    [categories]
+  );
+  const subGroupCats = useMemo(
+    () => categories.filter(c => c.parent !== 0).sort((a, b) => a.name.localeCompare(b.name)),
+    [categories]
+  );
+
+  // ── Grupos filtrados por búsqueda (se recomputan solo al escribir en el buscador) ──
+  const filteredGroupCats = useMemo(
+    () => groupCats.filter(c => c.name.toLowerCase().includes(groupSearch.toLowerCase())),
+    [groupCats, groupSearch]
+  );
+
+  // ── Subgrupos agrupados por padre (se recomputan solo cuando cambia la búsqueda) ──
+  const groupedSubCats = useMemo(() => {
+    const filtered = subGroupCats.filter(c => c.name.toLowerCase().includes(subGroupSearch.toLowerCase()));
+    const groups = {};
+    filtered.forEach(cat => {
+      const pid = String(cat.parent || 0);
+      if (!groups[pid]) groups[pid] = [];
+      groups[pid].push(cat);
+    });
+    return Object.keys(groups)
+      .sort((a, b) => {
+        const nameA = categoryMap.get(a)?.name || 'zz';
+        const nameB = categoryMap.get(b)?.name || 'zz';
+        return nameA.localeCompare(nameB);
+      })
+      .map(parentId => ({
+        parentId,
+        parentName: categoryMap.get(parentId)?.name || 'Otros',
+        items: groups[parentId],
+      }));
+  }, [subGroupCats, subGroupSearch, categoryMap]);
+
+  // ── Tags filtrados por búsqueda ──
+  const filteredTags = useMemo(
+    () => tags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)),
+    [tags, tagSearch]
+  );
+
+  // ── Helper toggle de categoría (estable entre renders) ──
+  const toggleCategory = useCallback((catId) => {
+    const id = String(catId);
+    setLocalItem(prev => {
+      const current = prev.categories ? prev.categories.map(String) : [];
+      const next = current.includes(id) ? current.filter(x => x !== id) : [...current, id];
+      return { ...prev, categories: next };
+    });
+  }, []);
+
   if (!localItem) return null;
 
   // Helper: obtener src de imagen (puede ser string o {id, src})
   const getImgSrc = (img) => typeof img === 'string' ? img : img?.src || '';
-
-  // --- Helpers de clasificación ---
-  const groupCats = categories.filter(c => c.parent === 0).sort((a,b) => a.name.localeCompare(b.name));
-  const subGroupCats = categories.filter(c => c.parent !== 0).sort((a,b) => a.name.localeCompare(b.name));
 
   const handleInternalSave = async () => {
       // 1. Si hay una URL escrita en el input manual y no se ha agregado, agregarla ahora.
@@ -555,33 +618,33 @@ export default function ProductEditModal({
                             </div>
                             <div className="cm-card-body cm-badges-wrapper">
                                 
-                                {/* 1. GRUPOS (Padres) */}
+                                {/* 1. GRUPOS (Padres) — lookup O(1) con categoryMap */}
                                 {localItem.categories?.map(id => {
-                                    const c = categories.find(cat => String(cat.id) === String(id));
-                                    if(!c || c.parent !== 0) return null;
+                                    const c = categoryMap.get(String(id));
+                                    if (!c || c.parent !== 0) return null;
                                     return (
                                         <span key={id} className="cm-badge group">
                                             Grupo: {c.name}
-                                            <button className="cm-badge-remove" onClick={() => setLocalItem(prev => ({ ...prev, categories: prev.categories.filter(x => String(x) !== String(id)) }))}>×</button>
+                                            <button className="cm-badge-remove" onClick={() => toggleCategory(id)}>×</button>
                                         </span>
                                     );
                                 })}
 
-                                {/* 2. SUBGRUPOS (Hijos) */}
+                                {/* 2. SUBGRUPOS (Hijos) — lookup O(1) */}
                                 {localItem.categories?.map(id => {
-                                    const c = categories.find(cat => String(cat.id) === String(id));
-                                    if(!c || c.parent === 0) return null;
+                                    const c = categoryMap.get(String(id));
+                                    if (!c || c.parent === 0) return null;
                                     return (
                                         <span key={id} className="cm-badge subgroup">
                                             Sub: {c.name}
-                                            <button className="cm-badge-remove" onClick={() => setLocalItem(prev => ({ ...prev, categories: prev.categories.filter(x => String(x) !== String(id)) }))}>×</button>
+                                            <button className="cm-badge-remove" onClick={() => toggleCategory(id)}>×</button>
                                         </span>
                                     );
                                 })}
 
-                                {/* 3. MARCAS */}
+                                {/* 3. MARCAS — lookup O(1) con tagMap */}
                                 {localItem.brands?.map(id => {
-                                    const b = tags.find(t => String(t.id) === String(id));
+                                    const b = tagMap.get(String(id));
                                     return (
                                         <span key={id} className="cm-badge brand">
                                             Marca: {b?.name || id}
@@ -589,9 +652,8 @@ export default function ProductEditModal({
                                         </span>
                                     );
                                 })}
-                                {/* Tags */}
                                 {localItem.tags?.map(id => {
-                                    const t = tags.find(tag => String(tag.id) === String(id));
+                                    const t = tagMap.get(String(id));
                                     return (
                                         <span key={id} className="cm-badge brand">
                                             Marca: {t?.name || id}
@@ -612,7 +674,7 @@ export default function ProductEditModal({
                     {/* 2. SECCIÓN INFERIOR: SELECTORES ORGANIZADOS */}
                     <div className="cm-grid-3-col">
                         
-                        {/* COL 1: GRUPOS */}
+                        {/* COL 1: GRUPOS — usa filteredGroupCats (ya memoizado) */}
                         <div className="cm-column-box">
                             <div className="cm-column-header">
                                 <label>1. Grupos (Padres)</label>
@@ -625,34 +687,26 @@ export default function ProductEditModal({
                                 />
                             </div>
                             <div className="cm-scroll-list large">
-                                {groupCats
-                                   .filter(c => c.name.toLowerCase().includes(groupSearch.toLowerCase()))
-                                   .map(cat => (
-                                    <label key={cat.id} className={`cm-list-item ${localItem.categories?.map(String).includes(String(cat.id)) ? 'selected' : ''}`}>
-                                        <input 
-                                          type="checkbox" value={cat.id}
-                                          checked={localItem.categories?.map(String).includes(String(cat.id))}
-                                          onChange={(e) => {
-                                              const isChecked = e.target.checked;
-                                              const catId = String(cat.id);
-                                              setLocalItem(prev => {
-                                                  const currentCats = prev.categories ? prev.categories.map(String) : [];
-                                                  return { 
-                                                      ...prev, 
-                                                      categories: isChecked ? [...currentCats, catId] : currentCats.filter(id => id !== catId) 
-                                                  };
-                                              });
-                                          }}
-                                        />
-                                        <div className="cm-list-item-content">
-                                            <span className="cm-list-item-text">{cat.name}</span>
-                                        </div>
-                                    </label>
-                                ))}
+                                {filteredGroupCats.map(cat => {
+                                    const catId = String(cat.id);
+                                    const isSelected = localItem.categories?.map(String).includes(catId);
+                                    return (
+                                        <label key={cat.id} className={`cm-list-item ${isSelected ? 'selected' : ''}`}>
+                                            <input 
+                                              type="checkbox" value={cat.id}
+                                              checked={!!isSelected}
+                                              onChange={() => toggleCategory(cat.id)}
+                                            />
+                                            <div className="cm-list-item-content">
+                                                <span className="cm-list-item-text">{cat.name}</span>
+                                            </div>
+                                        </label>
+                                    );
+                                })}
                             </div>
                         </div>
 
-                        {/* COL 2: SUBGRUPOS (AGRUPADOS) */}
+                        {/* COL 2: SUBGRUPOS — usa groupedSubCats (ya memoizado) */}
                         <div className="cm-column-box">
                              <div className="cm-column-header">
                                 <label>2. Subgrupos (Hijos)</label>
@@ -665,59 +719,34 @@ export default function ProductEditModal({
                                 />
                             </div>
                             <div className="cm-scroll-list large">
-                                {(() => {
-                                    // Lógica de Agrupación Inline
-                                    const filtered = subGroupCats.filter(c => c.name.toLowerCase().includes(subGroupSearch.toLowerCase()));
-                                    const groups = {};
-                                    filtered.forEach(cat => {
-                                        const pid = cat.parent || 0;
-                                        if(!groups[pid]) groups[pid] = [];
-                                        groups[pid].push(cat);
-                                    });
-                                    
-                                    const sortedGroupIds = Object.keys(groups).sort((a,b) => {
-                                        const nameA = groupCats.find(g => String(g.id) === String(a))?.name || 'zz';
-                                        const nameB = groupCats.find(g => String(g.id) === String(b))?.name || 'zz';
-                                        return nameA.localeCompare(nameB);
-                                    });
-
-                                    if(sortedGroupIds.length === 0) return <div style={{padding:'20px', textAlign:'center', color:'#94a3b8'}}>No encontrados</div>;
-
-                                    return sortedGroupIds.map(parentId => {
-                                        const parentName = groupCats.find(p => String(p.id) === String(parentId))?.name || 'Otros';
-                                        return (
-                                            <div key={parentId}>
-                                                <div className="cm-group-header">{parentName}</div>
-                                                {groups[parentId].map(cat => (
-                                                    <label key={cat.id} className={`cm-list-item ${localItem.categories?.map(String).includes(String(cat.id)) ? 'selected' : ''}`}>
+                                {groupedSubCats.length === 0
+                                    ? <div style={{padding:'20px', textAlign:'center', color:'#94a3b8'}}>No encontrados</div>
+                                    : groupedSubCats.map(({ parentId, parentName, items }) => (
+                                        <div key={parentId}>
+                                            <div className="cm-group-header">{parentName}</div>
+                                            {items.map(cat => {
+                                                const catId = String(cat.id);
+                                                const isSelected = localItem.categories?.map(String).includes(catId);
+                                                return (
+                                                    <label key={cat.id} className={`cm-list-item ${isSelected ? 'selected' : ''}`}>
                                                         <input 
                                                             type="checkbox" value={cat.id}
-                                                            checked={localItem.categories?.map(String).includes(String(cat.id))}
-                                                            onChange={(e) => {
-                                                                const isChecked = e.target.checked;
-                                                                const catId = String(cat.id);
-                                                                setLocalItem(prev => {
-                                                                    const currentCats = prev.categories ? prev.categories.map(String) : [];
-                                                                    return { 
-                                                                        ...prev, 
-                                                                        categories: isChecked ? [...currentCats, catId] : currentCats.filter(id => id !== catId) 
-                                                                    };
-                                                                });
-                                                            }}
+                                                            checked={!!isSelected}
+                                                            onChange={() => toggleCategory(cat.id)}
                                                         />
                                                         <div className="cm-list-item-content">
                                                             <span className="cm-list-item-text">{cat.name}</span>
                                                         </div>
                                                     </label>
-                                                ))}
-                                            </div>
-                                        );
-                                    });
-                                })()}
+                                                );
+                                            })}
+                                        </div>
+                                    ))
+                                }
                             </div>
                         </div>
 
-                        {/* COL 3: MARCAS */}
+                        {/* COL 3: MARCAS — usa filteredTags (ya memoizado) */}
                         <div className="cm-column-box">
                             <div className="cm-column-header">
                                 <label>3. Marcas</label>
@@ -746,10 +775,7 @@ export default function ProductEditModal({
                             </div>
 
                             <div className="cm-scroll-list large">
-                                {tags
-                                  .filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()))
-                                  .sort((a,b) => a.name.localeCompare(b.name))
-                                  .map(t => {
+                                {filteredTags.map(t => {
                                      const isBrand = t.taxonomy === 'brand';
                                      const isChecked = isBrand 
                                         ? (localItem.brands?.map(String).includes(String(t.id)))

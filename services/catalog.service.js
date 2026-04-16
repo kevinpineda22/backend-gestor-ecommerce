@@ -1058,6 +1058,14 @@ export async function adoptWooProducts() {
   });
   console.log(`📍 Sedes activas: ${Object.keys(allSedesActive).join(', ')}`);
 
+  // Pre-fetch: items que YA tienen woo_product_id asignado.
+  // Estos NO deben tener su active_sedes sobreescrita — el usuario los configuró manualmente.
+  const existingLinkedRows = await fetchAllRows("ecommerce_products", "item, woo_product_id");
+  const alreadyLinked = new Set(
+    existingLinkedRows.filter(r => r.woo_product_id != null).map(r => String(r.item).trim().toUpperCase())
+  );
+  console.log(`🔗 Productos ya vinculados (active_sedes se preservará): ${alreadyLinked.size}`);
+
   let page = 1;
   const perPage = 100;
   let totalProcessed = 0;
@@ -1107,18 +1115,42 @@ export async function adoptWooProducts() {
       // Registrar este ID como existente en Woo
       syncedWooIds.add(p.id);
 
-      payload.push({
-        item: String(itemKey),
-        woo_product_id: p.id,
-        woo_status: p.status,
-        ecommerce_active: p.status === "publish",
-        active_sedes: p.status === "publish" ? allSedesActive : allSedesInactive,
-        image_url: p.images?.[0]?.src || null,
-        woo_name: p.name, 
-        woo_category_names: catNames,
-        woo_tag_names: tagNames,
-        last_sync: new Date().toISOString()
-      });
+      const itemKeyUpper = String(itemKey).trim().toUpperCase();
+      const isAlreadyLinked = alreadyLinked.has(itemKeyUpper);
+
+      if (isAlreadyLinked) {
+        // Producto ya vinculado: NO tocar active_sedes (el usuario lo configuró manualmente).
+        // Solo refrescar metadatos: woo_product_id, status, nombre, imagen, cats, tags.
+        // IMPORTANTE: image_url solo se actualiza si Woo devuelve una imagen real —
+        // nunca se sobreescribe con null para proteger imágenes configuradas en el gestor.
+        const freshImageUrl = p.images?.[0]?.src || undefined; // undefined = no incluir en payload
+        const linkedPayload = {
+          item: String(itemKey),
+          woo_product_id: p.id,
+          woo_status: p.status,
+          ecommerce_active: p.status === "publish",
+          woo_name: p.name,
+          woo_category_names: catNames,
+          woo_tag_names: tagNames,
+          last_sync: new Date().toISOString()
+        };
+        if (freshImageUrl) linkedPayload.image_url = freshImageUrl;
+        payload.push(linkedPayload);
+      } else {
+        // Producto NUEVO (nunca vinculado): sí se inicializa active_sedes.
+        payload.push({
+          item: String(itemKey),
+          woo_product_id: p.id,
+          woo_status: p.status,
+          ecommerce_active: p.status === "publish",
+          active_sedes: p.status === "publish" ? allSedesActive : allSedesInactive,
+          image_url: p.images?.[0]?.src || null,
+          woo_name: p.name,
+          woo_category_names: catNames,
+          woo_tag_names: tagNames,
+          last_sync: new Date().toISOString()
+        });
+      }
     }
 
     if (missingSkuCount > 0) {
