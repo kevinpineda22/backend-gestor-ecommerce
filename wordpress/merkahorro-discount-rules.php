@@ -369,11 +369,17 @@ function merkahorro_discount_build_wdr_rule($rule) {
     }
 
     // --- Descuento ---
+    // apply_as = 'sale_price': Flycart evalúa reglas POR PRODUCTO (no por carrito).
+    // Esto significa que exclusive=1 solo detiene otras reglas para ESE producto,
+    // no para todo el carrito. Resultado: la regla separata de Frutas (35%) bloquea
+    // que el descuento semanal se sume a las frutas, Y la regla de Flips (25%) bloquea
+    // el semanal en Flips — sin que ninguna interfiera con la otra.
+    // Con 'first_matched_rule' el exclusive era cart-wide y una regla bloqueaba a la otra.
     $wdr_discount_type = ($discount_type === 'percentage') ? 'percentage' : 'flat';
     $product_adjustments = array(
         'type'     => $wdr_discount_type,
         'value'    => strval($discount_value),
-        'apply_as' => 'first_matched_rule',
+        'apply_as' => 'sale_price',
         'cart_label' => $title,
     );
 

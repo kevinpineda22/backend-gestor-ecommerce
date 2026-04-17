@@ -883,6 +883,21 @@ add_action('rest_api_init', function() {
                 $existing_map[$row['title']] = (int) $row['id'];
             }
 
+            // PASO 1b: Pre-calcular IDs de productos de reglas separata (priority ≤ 5)
+            // para pasárselos a las reglas semanales y que las excluyan.
+            // Esto elimina la necesidad de exclusive=1: cada producto queda cubierto
+            // por UNA sola regla → sin stacking, sin bloqueo entre reglas.
+            $separata_product_ids = array();
+            foreach ($rules as $_r) {
+                $prio = intval($_r['priority'] ?? $_r['display_order'] ?? 50);
+                if ($prio <= 5 && !empty($_r['applies_to_ids'])) {
+                    foreach ((array)$_r['applies_to_ids'] as $_id) {
+                        $separata_product_ids[] = strval($_id);
+                    }
+                }
+            }
+            $separata_product_ids = array_values(array_unique($separata_product_ids));
+
             // PASO 2: Upsert — actualizar si existe, insertar si no
             $synced = 0;
             $updated = 0;
@@ -894,7 +909,7 @@ add_action('rest_api_init', function() {
                 // Agregar prefijo al título para identificar reglas del Gestor
                 $rule['title'] = $prefix . ($rule['title'] ?? 'Descuento');
 
-                $wdr_data = merkahorro_build_wdr_rule($rule);
+                $wdr_data = merkahorro_build_wdr_rule($rule, $separata_product_ids);
                 if (!$wdr_data) {
                     $errors[] = 'Error construyendo regla: ' . ($rule['title'] ?? '?');
                     continue;
@@ -936,6 +951,30 @@ add_action('rest_api_init', function() {
                     '_transient_timeout_wdr_%'
                 )
             );
+
+            // PASO 5: Limpiar caché de precios de WooCommerce para productos variables.
+            // Con apply_as='sale_price', Flycart hookea los filtros de precio dinámicamente.
+            // WooCommerce cachea los rangos de precio de variaciones en transients wc_var_prices_*.
+            // Si ese caché queda viejo, el descuento de Flycart no se ve en el listado aunque
+            // la regla esté bien configurada. Forzar recálculo limpiando todos esos transients.
+            $wpdb->query(
+                "DELETE FROM {$wpdb->options}
+                 WHERE option_name LIKE '\_transient\_wc\_var\_prices\_%'
+                    OR option_name LIKE '\_transient\_timeout\_wc\_var\_prices\_%'"
+            );
+            // Limpiar también la versión de caché de variaciones de WooCommerce
+            delete_transient('wc_products_onsale');
+            delete_option('woocommerce_cache_excluded_uris');
+            if (function_exists('wc_delete_product_transients')) {
+                // Invalidar transients de productos afectados por las reglas
+                foreach ($processed_titles as $ptitle) {
+                    // No necesitamos id de producto — solo forzar recálculo global con cache_version
+                }
+            }
+            // Incrementar versión de caché de variaciones para forzar recálculo
+            $current_version = (int) get_option('wc_var_prices_version', 0);
+            update_option('wc_var_prices_version', $current_version + 1);
+
             if (function_exists('wp_cache_flush')) wp_cache_flush();
 
             return new WP_REST_Response(array(
@@ -998,7 +1037,7 @@ add_action('rest_api_init', function() {
  * Construir un registro compatible con wp_wdr_rules del plugin FlyCart
  * a partir de una regla de nuestro Gestor
  */
-function merkahorro_build_wdr_rule($rule) {
+function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
     $title = $rule['title'] ?? 'Descuento';
     $discount_type = $rule['discount_type'] ?? 'percentage';
     $discount_value = floatval($rule['discount_value'] ?? 0);
@@ -1041,6 +1080,19 @@ function merkahorro_build_wdr_rule($rule) {
         );
     }
     // Si es 'all', $wdr_apply_to queda como 'all_products' y sin filtros
+
+    // Para reglas semanales (priority > 5) que aplican a TODOS los productos:
+    // excluir los productos ya cubiertos por reglas separata.
+    // Así cada producto solo coincide con UNA regla → sin stacking, sin necesidad de exclusive.
+    if ($priority > 5 && $wdr_apply_to === 'all_products' && !empty($separata_exclude_ids)) {
+        $filters[] = array(
+            'type'     => 'products',
+            'method'   => 'not_in_list',   // Flycart: 'not_in_list', NO 'nin_list'
+            'value'    => $separata_exclude_ids,
+            'cartQty'  => 'product',
+        );
+        $wdr_apply_to = 'specific_products';
+    }
 
     // --- Conditions: cuándo aplica ---
     // Formato nativo de FlyCart: objeto con claves numéricas a partir de 2
@@ -1100,11 +1152,16 @@ function merkahorro_build_wdr_rule($rule) {
     }
 
     // --- Product adjustments: el descuento ---
+    // apply_as = 'sale_price': Flycart evalúa reglas POR PRODUCTO (no por carrito).
+    // Con esto, exclusive=1 solo detiene otras reglas para ESE producto específico,
+    // sin bloquear reglas de otros productos. La separata 35% bloquea el semanal
+    // solo en frutas; la separata 25% bloquea el semanal solo en Flips.
+    // Con 'first_matched_rule' el exclusive era cart-wide y una regla bloqueaba a la otra.
     $wdr_discount_type = ($discount_type === 'percentage') ? 'percentage' : 'flat';
     $product_adjustments = array(
         'type' => $wdr_discount_type,
         'value' => strval($discount_value),
-        'apply_as' => 'first_matched_rule',
+        'apply_as' => 'sale_price',
         'cart_label' => $title,
     );
 
@@ -1121,10 +1178,10 @@ function merkahorro_build_wdr_rule($rule) {
     return array(
         'title'                => $title,
         'enabled'              => $active,
-        // exclusive='1': FlyCart aplica esta regla y NO apila otras reglas sobre el mismo producto.
-        // Con todas las reglas exclusivas y ordenadas por priority, solo gana la de mayor prioridad
-        // (número más bajo). Así la separata de 35% no se suma al 25% semanal.
-        'exclusive'            => '1',
+        // exclusive='0': No usar exclusividad de Flycart (es cart-level, bloquea TODAS las reglas).
+        // En su lugar, las reglas semanales tienen un filtro 'not_in_list' que excluye los productos
+        // de separata. Así cada producto solo coincide con una regla → sin stacking, sin bloqueos.
+        'exclusive'            => '0',
         'priority'             => $priority,
         'apply_to'             => $wdr_apply_to,
         'filters'              => wp_json_encode($filters ?: new stdClass()),
@@ -1413,6 +1470,7 @@ function merkahorro_separatas_shortcode($atts) {
         ?>
     </div>
     <?php if ($sep_max_pages > 1): ?>
+    <div class="woocommerce">
     <nav class="woocommerce-pagination" style="margin-top:24px;">
         <?php echo paginate_links(array(
             'base'      => add_query_arg('sep_page', '%#%'),
@@ -1425,6 +1483,7 @@ function merkahorro_separatas_shortcode($atts) {
             'add_args'  => false,
         )); ?>
     </nav>
+    </div>
     <?php endif; ?>
     <?php endif; ?>
 
@@ -1517,12 +1576,19 @@ function merkahorro_get_separata_rule_ids() {
     $table  = $wpdb->prefix . 'wdr_rules';
     $prefix = '[MK-Gestor] ';
 
+    $now_ts = time();
     $rules = $wpdb->get_results(
         $wpdb->prepare(
             "SELECT title, filters FROM {$table}
-              WHERE title LIKE %s AND enabled = '1' AND CAST(priority AS UNSIGNED) <= 5
+              WHERE title LIKE %s
+                AND enabled = '1'
+                AND CAST(priority AS UNSIGNED) <= 5
+                AND (date_from IS NULL OR date_from = 0 OR date_from <= %d)
+                AND (date_to   IS NULL OR date_to   = 0 OR date_to   >= %d)
               ORDER BY CAST(priority AS UNSIGNED) ASC",
-            $wpdb->esc_like($prefix) . '%'
+            $wpdb->esc_like($prefix) . '%',
+            $now_ts,
+            $now_ts
         ),
         ARRAY_A
     );
@@ -1970,6 +2036,13 @@ add_action('template_redirect', function() {
     $active_max = isset($_GET['max_price']) ? floatval($_GET['max_price']) : '';
     $has_price_filter = ($active_min !== '' || $active_max !== '');
 
+    // Forzar el <title> de la pestaña para esta página custom.
+    // Sin esto WordPress usa el título de otra página (la que tenga el query por defecto).
+    add_filter('document_title_parts', function($title) use ($rule_title) {
+        $title['title'] = preg_replace('/^\[MK-Gestor\]\s*/i', '', $rule_title);
+        return $title;
+    });
+
     get_header();
     ?>
 
@@ -2055,7 +2128,7 @@ add_action('template_redirect', function() {
                 <!-- Ordenar -->
                 <div class="mks-filter-widget">
                     <p class="mks-filter-widget-title">↕ Ordenar por</p>
-                    <form method="get">
+                    <form method="get" action="<?php echo esc_url(strtok($_SERVER['REQUEST_URI'], '?')); ?>">
                         <?php foreach ($_GET as $k => $v):
                             if ($k === 'orderby') continue;
                             echo '<input type="hidden" name="' . esc_attr($k) . '" value="' . esc_attr($v) . '">';
@@ -2111,8 +2184,25 @@ add_action('template_redirect', function() {
                     <?php woocommerce_product_loop_end(); ?>
                     <?php wp_reset_postdata(); wc_reset_loop(); ?>
 
-                    <!-- Paginación nativa de WooCommerce -->
-                    <?php woocommerce_pagination(); ?>
+                    <!-- Paginación con URL explícita — woocommerce_pagination() usa get_pagenum_link()
+                         que no funciona con rewrite custom. Usamos paginate_links() directamente
+                         con add_query_arg para generar ?paged=X sobre la URL actual. -->
+                    <?php if ($promo_loop->max_num_pages > 1): ?>
+                    <div class="woocommerce">
+                    <nav class="woocommerce-pagination" style="margin-top:24px;">
+                        <?php echo paginate_links(array(
+                            'base'      => add_query_arg('paged', '%#%'),
+                            'format'    => '',
+                            'current'   => $paged,
+                            'total'     => $promo_loop->max_num_pages,
+                            'prev_text' => '&laquo;',
+                            'next_text' => '&raquo;',
+                            'type'      => 'list',
+                            'add_args'  => false,
+                        )); ?>
+                    </nav>
+                    </div>
+                    <?php endif; ?>
 
                 <?php else: ?>
                     <?php wp_reset_postdata(); ?>
@@ -2139,3 +2229,65 @@ add_action('wp_loaded', function() {
         flush_rewrite_rules(false);
     }
 });
+
+// ═══════════════════════════════════════════════
+// BADGE DE OFERTA: Reemplazo del "¡Oferta!" por defecto de WooCommerce
+// Reemplaza el texto genérico por un badge con los colores de Merkahorro
+// y muestra el porcentaje de descuento real del producto.
+// ═══════════════════════════════════════════════
+
+// Aplicar estilos Merkahorro SOLO a los badges de descuento por valor fijo.
+// Prioridad 999 = corre al final, después de que Flycart ya haya modificado el HTML
+// de las reglas por porcentaje.
+// Lógica: si el $html ya contiene "%" → Flycart lo manejó → no tocar.
+//         si no tiene "%" → es el badge genérico de WooCommerce ("¡Oferta!") → reemplazar.
+add_filter('woocommerce_sale_flash', function($html, $post, $product) {
+    // Flycart/AWDR ya aplicó un badge con porcentaje — no interferir
+    if (strpos($html, '%') !== false) {
+        return $html;
+    }
+    // Badge nativo de WooCommerce (descuento por valor fijo) — aplicar branding
+    return '<span class="onsale mks-fixed-sale">Oferta Separata</span>';
+}, 999, 3);
+
+// Inyectar CSS en el frontend (una sola vez, peso mínimo)
+// IMPORTANTE: Solo apuntamos a .mks-fixed-sale (clase que solo nosotros inyectamos).
+// El .onsale genérico NO se toca para no interferir con el badge de Flycart en reglas %.
+add_action('wp_head', function() { ?>
+<style>
+/* ─── Badge de oferta Merkahorro (solo descuentos por valor fijo) ─── */
+span.mks-fixed-sale,
+.woocommerce span.mks-fixed-sale,
+.woocommerce-page span.mks-fixed-sale,
+ul.products li.product .mks-fixed-sale,
+.woocommerce ul.products li.product .mks-fixed-sale {
+    /* Posición */
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: auto;
+    z-index: 9;
+    /* Forma */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    width: auto;
+    height: auto;
+    padding: 4px 10px;
+    border-radius: 6px;
+    /* Colores Merkahorro */
+    background: #160857 !important;
+    color: #88dc00 !important;
+    /* Tipografía */
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: .04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    /* Reset forma circular del tema */
+    border: none;
+    box-shadow: 0 2px 8px rgba(22, 8, 87, 0.35);
+}
+</style>
+<?php }, 20);
