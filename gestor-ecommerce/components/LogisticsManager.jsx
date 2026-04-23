@@ -27,6 +27,7 @@ const SEDE_LABELS = {
 const DEFAULT_DAY = { enabled: 1, orders_start: "07:00", orders_end: "20:00", service_start: "08:00", service_end: "18:00" };
 
 const DEFAULT_CONFIG = {
+  module_enabled: 1,
   branch_name: "",
   display_format: "j \\d\\e F, Y \\a \\l\\a\\s g:i a",
   delivery_label: "Entrega estimada",
@@ -378,6 +379,32 @@ export default function LogisticsManager({ sedes = [], sedeActual = null, esAdmi
   function renderGeneralTab() {
     return (
       <div className="lm-section">
+        {/* Estado del módulo */}
+        <div className="lm-section-card">
+          <div className="lm-section-header">
+            <div className="lm-section-icon">⚙️</div>
+            <div>
+              <div className="lm-section-title">Estado del Módulo</div>
+              <div className="lm-section-sub">Activa o desactiva la logística de esta sede hacia el cliente final</div>
+            </div>
+          </div>
+          <div className="lm-form-grid" style={{ marginBottom: '1rem' }}>
+            <div className="lm-field full">
+              <label className="lm-label lm-toggle-label" style={{ fontSize: '1.05rem', marginTop: '0.5rem', marginBottom: '0.2rem' }}>
+                <input
+                  type="checkbox"
+                  checked={config.module_enabled !== 0}
+                  onChange={e => updateField('module_enabled', e.target.checked ? 1 : 0)}
+                />
+                <span style={{ marginLeft: '10px' }}><strong>Mostrar información de logística a los clientes</strong></span>
+              </label>
+              <div className="lm-help" style={{ marginLeft: '34px', fontSize: '0.9rem', color: '#666' }}>
+                Si desactivas esta opción (apagado), el cliente <strong>NO</strong> verá los tiempos estimados de entrega ni recogida al finalizar su compra. Funciona como un switch maestro para apagar o prender los mensajes en la tienda de esta sede.
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Nombre de la sede */}
         <div className="lm-section-card">
           <div className="lm-section-header">

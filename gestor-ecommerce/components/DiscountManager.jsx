@@ -30,7 +30,7 @@ const SEDE_ICONS = {
 
 const EMPTY_FORM = {
   title: "",
-  discount_type: "percentage",  // "percentage" | "fixed" | "value_discount"
+  discount_type: "percentage",  // "percentage" | "exact_price" | "value_discount"
   discount_value: 0,
   applies_to: "products",
   applies_to_ids: [],
@@ -966,7 +966,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
             {importPreview.map((rule, idx) => (
               <div key={idx} className="ge-rule-row preview">
                 <div className="ge-badge discount">
-                  {rule.discount_value}{rule.discount_type === 'percentage' ? '%' : '$'}
+                  {rule.discount_type === 'exact_price' ? '$' : ''}{rule.discount_value}{rule.discount_type === 'percentage' ? '%' : (rule.discount_type !== 'exact_price' ? '$' : '')}
                 </div>
                 <div className="ge-row-info">
                   <div className="ge-row-title">{rule.title}</div>
@@ -1020,7 +1020,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
               <span key={r.id} className="ge-pill active-accent">
                 {r.title} — {r.discount_type === 'value_discount'
                   ? `${(r.product_discounts || []).length} productos`
-                  : `${r.discount_value}${r.discount_type === 'percentage' ? '%' : '$'}`}
+                  : (r.discount_type === 'exact_price' ? `$${r.discount_value}` : `${r.discount_value}${r.discount_type === 'percentage' ? '%' : '$'}`)}
               </span>
             ))}
           </div>
@@ -1055,7 +1055,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                     )}
                   </>
                 ) : form.discount_value > 0 ? (
-                  <>{form.discount_value}{form.discount_type === 'percentage' ? '%' : '$'} <span>de descuento</span></>
+                  <>{form.discount_type === 'exact_price' ? 'Precio final: $' : ''}{form.discount_value}{form.discount_type === 'percentage' ? '%' : (form.discount_type !== 'exact_price' ? '$' : '')} <span>{form.discount_type === 'exact_price' ? '(exacto)' : 'de descuento'}</span></>
                 ) : (
                   <span className="dm-discount-preview-empty">Configura el descuento</span>
                 )}
@@ -1092,14 +1092,14 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                         }));
                       }}>
                         <option value="percentage">Porcentaje (%)</option>
-                        <option value="fixed">Valor fijo ($)</option>
+                        <option value="exact_price">Precio Fijo Exacto ($)</option>
                         <option value="value_discount">Valor dscto (individual por producto)</option>
                       </select>
                     </div>
                     {form.discount_type !== 'value_discount' && (
                     <div className="ge-form-group">
-                      <label>Valor {form.discount_type === 'percentage' ? '(%)' : '($)'}</label>
-                      <input type="number" className="ge-input" placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 5000"} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))} min="0" max={form.discount_type === 'percentage' ? 100 : undefined} />
+                      <label>{form.discount_type === 'exact_price' ? 'Precio Final ($)' : `Valor ${form.discount_type === 'percentage' ? '(%)' : '($)'}`}</label>
+                      <input type="number" className="ge-input" placeholder={form.discount_type === 'percentage' ? "Ej: 15" : "Ej: 54990"} value={form.discount_value} onChange={e => setForm(f => ({ ...f, discount_value: Number(e.target.value) }))} min="0" max={form.discount_type === 'percentage' ? 100 : undefined} />
                     </div>
                     )}
                   </div>
@@ -1434,7 +1434,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                         }}>
                           {(form.badge_text || 'Ahorra un {{discount}} en este producto!')
                             .replace('{{discount}}', form.discount_value > 0
-                              ? `${form.discount_value}${form.discount_type === 'percentage' ? '%' : '$'}`
+                              ? (form.discount_type === 'percentage' ? `${form.discount_value}%` : `$${form.discount_value}`)
                               : '...')}
                         </div>
                       </div>
@@ -1523,7 +1523,7 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
                     </>
                   ) : (
                     <>
-                      <div className="ge-badge-value">{rule.discount_value}{rule.discount_type === 'percentage' ? '%' : '$'}</div>
+                      <div className="ge-badge-value">{rule.discount_type === 'exact_price' ? '$' : ''}{rule.discount_value}{rule.discount_type === 'percentage' ? '%' : (rule.discount_type !== 'exact_price' ? '$' : '')}</div>
                       <div className="ge-badge-label">{rule.discount_type === 'percentage' ? 'desc.' : 'fijo'}</div>
                     </>
                   )}

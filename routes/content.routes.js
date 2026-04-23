@@ -136,4 +136,58 @@ router.put('/logistics/:sedeCode', async (req, res) => {
     }
 });
 
+// ═══════ TILES DE DESCUENTOS ESPECIALES ═══════
+
+// GET /api/content/discount-tiles — usada por el plugin WP para la categoría descuentos-especiales
+router.get('/discount-tiles', async (req, res) => {
+    try {
+        const result = await contentService.getDiscountCategoryTiles(req.query.sede || null);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
+// POST /api/content/discount-tiles
+router.post('/discount-tiles', async (req, res) => {
+    try {
+        const result = await contentService.createDiscountCategoryTile(req.body);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
+// PUT /api/content/discount-tiles/:id
+router.put('/discount-tiles/:id', async (req, res) => {
+    try {
+        const result = await contentService.updateDiscountCategoryTile(req.params.id, req.body);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
+// DELETE /api/content/discount-tiles/:id
+router.delete('/discount-tiles/:id', async (req, res) => {
+    try {
+        const result = await contentService.deleteDiscountCategoryTile(req.params.id);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
+// POST /api/content/discount-tiles/reorder
+router.post('/discount-tiles/reorder', async (req, res) => {
+    try {
+        const { orderedIds } = req.body;
+        if (!Array.isArray(orderedIds)) return res.status(400).json({ ok: false, message: 'orderedIds debe ser un array' });
+        const result = await contentService.reorderDiscountCategoryTiles(orderedIds);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ ok: false, message: err.message });
+    }
+});
+
 export default router;

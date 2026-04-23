@@ -512,3 +512,77 @@ export async function applyValueDiscountsToWoo({ product_discounts, sedes, remov
         }
     };
 }
+
+// ─── TILES DE DESCUENTOS ESPECIALES ──────────────────────────────────────────
+// Controla los tiles en /categoria-producto/descuentos-especiales/ por sede.
+
+export async function getDiscountCategoryTiles(sede = null) {
+    try {
+        const { data, error } = await supabase
+            .from('discount_category_tiles')
+            .select('*')
+            .order('display_order', { ascending: true });
+        if (error) throw error;
+
+        let filtered = data;
+        if (sede) {
+            filtered = data.filter(t => !t.sedes || t.sedes.includes(sede));
+        }
+        return { ok: true, data: filtered };
+    } catch (e) {
+        console.error('Error getDiscountCategoryTiles:', e);
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function createDiscountCategoryTile(tileData) {
+    try {
+        const { data, error } = await supabase
+            .from('discount_category_tiles')
+            .insert([tileData])
+            .select();
+        if (error) throw error;
+        return { ok: true, data: data[0] };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function updateDiscountCategoryTile(id, updates) {
+    try {
+        const { error } = await supabase
+            .from('discount_category_tiles')
+            .update(updates)
+            .eq('id', id);
+        if (error) throw error;
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function deleteDiscountCategoryTile(id) {
+    try {
+        const { error } = await supabase
+            .from('discount_category_tiles')
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}
+
+export async function reorderDiscountCategoryTiles(orderedIds) {
+    // orderedIds: array de IDs en el nuevo orden, ej: [3, 1, 5, 2, 4]
+    try {
+        const updates = orderedIds.map((id, index) =>
+            supabase.from('discount_category_tiles').update({ display_order: index + 1 }).eq('id', id)
+        );
+        await Promise.all(updates);
+        return { ok: true };
+    } catch (e) {
+        return { ok: false, message: e.message };
+    }
+}

@@ -1,0 +1,872 @@
+PS C:\Users\DESARROLLO-PC\Desktop\BACKENDS\Backend-gestor-ecomerce> 
+     // Con 'first_matched_rule' el exclusive era cart-wide y una regla bloqueaba a la otra.
+-    $wdr_discount_type = ($discount_type === 'percentage') ? 'percentage' : 'flat';
++    $wdr_discount_type = 'flat';
++    if ($discount_type === 'percentage') {
++        $wdr_discount_type = 'percentage';
++    } elseif ($discount_type === 'exact_price') {
++        $wdr_discount_type = 'fixed_price';
++    }
++
+     $product_adjustments = array(
+         'type' => $wdr_discount_type,
+         'value' => strval($discount_value),
+@@ -1166,11 +1219,28 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
+     );
+ 
+     // --- Fechas para las columnas date_from / date_to de FlyCart ---
++    // IMPORTANTE: FlyCart compara date_from/date_to contra time() de PHP (UTC).
++    // WordPress guarda las horas en zona local (Colombia UTC-5).
++    // Este c�digo convierte el d�a/mes del panel a una fecha UTC real
++    // para que la regla NO expire 5 horas antes.
+     $wdr_date_from = null;
+-    $wdr_date_to = null;
++    $wdr_date_to   = null;
+     if ($schedule_type === 'date_range') {
+-        $wdr_date_from = $date_start ? strtotime($date_start) : null;
+-        $wdr_date_to = $date_end ? strtotime($date_end . ' 23:59:59') : null;
++        $tz = get_option('timezone_string') ?: 'America/Bogota';
++        try {
++            $dtz = new DateTimeZone($tz);
++        } catch (Exception $e) {
++            $dtz = new DateTimeZone('America/Bogota');
++        }
++
++        if ($date_start) {
++            $dt = new DateTime($date_start . ' 00:00:00', $dtz);
++            $wdr_date_from = $dt->getTimestamp();
++        }
++        if ($date_end) {
++            $dt = new DateTime($date_end . ' 23:59:59', $dtz);
++            $wdr_date_to = $dt->getTimestamp();
++        }
+     }
+ 
+     $now = current_time('mysql');
+@@ -1180,7 +1250,7 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
+         'enabled'              => $active,
+         // exclusive='0': No usar exclusividad de Flycart (es cart-level, bloquea TODAS las reglas).
+         // En su lugar, las reglas semanales tienen un filtro 'not_in_list' que excluye los productos
+-        // de separata. Así cada producto solo coincide con una regla → sin stacking, sin bloqueos.
++        // de separata. As� cada producto solo coincide con una regla ? sin stacking, sin bloqueos.
+         'exclusive'            => '0',
+         'priority'             => $priority,
+         'apply_to'             => $wdr_apply_to,
+@@ -1217,12 +1287,12 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
+     );
+ }
+ 
+-// ═══════════════════════════════════════════════
++// -----------------------------------------------
+ // SHORTCODE: [merkahorro_separatas]
+-// Muestra flyers + productos de reglas con prioridad separata (≤5).
+-// Uso: [merkahorro_separatas] en cualquier página o widget
++// Muestra flyers + productos de reglas con prioridad separata (=5).
++// Uso: [merkahorro_separatas] en cualquier p�gina o widget
+ // Atributo opcional: cols="3" para cambiar columnas de los flyers.
+-// ═══════════════════════════════════════════════
++// -----------------------------------------------
+ function merkahorro_separatas_shortcode($atts) {
+     $atts = shortcode_atts(array(
+         'section' => 'promo_separatas',
+@@ -1234,7 +1304,7 @@ function merkahorro_separatas_shortcode($atts) {
+     $grid_id     = 'mks-sep-' . wp_rand(1000, 9999);
+     $prod_grid   = 'mks-sep-prod-' . wp_rand(1000, 9999);
+ 
+-    // ─── Productos de reglas separata con paginación ─────────────────────────────
++    // --- Productos de reglas separata con paginaci�n -----------------------------
+     $sep_products  = array();
+     $sep_total     = 0;
+     $sep_max_pages = 1;
+@@ -1276,7 +1346,7 @@ function merkahorro_separatas_shortcode($atts) {
+     ob_start();
+     ?>
+     <style>
+-        /* ─── Hero: solo títulos, sin caja azul ─── */
++        /* --- Hero: solo t�tulos, sin caja azul --- */
+         .mks-sep-hero {
+             padding: 8px 0 24px;
+             text-align: left;
+@@ -1296,7 +1366,7 @@ function merkahorro_separatas_shortcode($atts) {
+             font-size: 0.95rem;
+         }
+ 
+-        /* ─── Flyers grid ─── */
++        /* --- Flyers grid --- */
+         .mks-sep-section-label {
+             font-size: 0.78rem;
+             font-weight: 700;
+@@ -1314,7 +1384,7 @@ function merkahorro_separatas_shortcode($atts) {
+             height: 2px;
+             background: #e8e8e8;
+         }
+-        /* ─── Carousel de separatas ─── */
++        /* --- Carousel de separatas --- */
+         .mks-sep-carousel-wrap { position: relative; margin-bottom: 36px; }
+         #<?php echo esc_attr($grid_id); ?> {
+             display: flex;
+@@ -1354,7 +1424,7 @@ function merkahorro_separatas_shortcode($atts) {
+         .mks-sep-nav-prev { left: -20px; }
+         .mks-sep-nav-next { right: -20px; }
+ 
+-        /* ─── Lightbox modal ─── */
++        /* --- Lightbox modal --- */
+         .mks-sep-modal-overlay {
+             display: none;
+             position: fixed;
+@@ -1396,12 +1466,12 @@ function merkahorro_separatas_shortcode($atts) {
+             padding: 0;
+         }
+ 
+-        /* ─── Productos: dejar que WooCommerce maneje el grid igual que la tienda ─── */
++        /* --- Productos: dejar que WooCommerce maneje el grid igual que la tienda --- */
+         #<?php echo esc_attr($prod_grid); ?>.woocommerce ul.products {
+             margin: 0 !important;
+         }
+ 
+-        /* ─── Responsive ─── */
++        /* --- Responsive --- */
+         @media (max-width: 900px) {
+             #<?php echo esc_attr($grid_id); ?> .mks-sep-card { flex: 0 0 calc(50% - 9px); }
+         }
+@@ -1411,10 +1481,10 @@ function merkahorro_separatas_shortcode($atts) {
+         }
+     </style>
+ 
+-    <!-- ─── Lightbox overlay ─── -->
++    <!-- --- Lightbox overlay --- -->
+     <div class="mks-sep-modal-overlay" id="mks-sep-modal-<?php echo esc_attr($grid_id); ?>">
+         <div class="mks-sep-modal-inner">
+-            <button class="mks-sep-modal-close" aria-label="Cerrar">✕</button>
++            <button class="mks-sep-modal-close" aria-label="Cerrar">?</button>
+             <img src="" alt="Separata" id="mks-sep-modal-img-<?php echo esc_attr($grid_id); ?>">
+         </div>
+     </div>
+@@ -1422,7 +1492,7 @@ function merkahorro_separatas_shortcode($atts) {
+     (function(){
+         var overlay = document.getElementById('mks-sep-modal-<?php echo esc_js($grid_id); ?>');
+         if (!overlay) return;
+-        // Cerrar con botón ✕ o clic sobre el fondo
++        // Cerrar con bot�n ? o clic sobre el fondo
+         overlay.addEventListener('click', function(e){
+             if (e.target === overlay || e.target.classList.contains('mks-sep-modal-close')) {
+                 overlay.classList.remove('active');
+@@ -1439,16 +1509,16 @@ function merkahorro_separatas_shortcode($atts) {
+     })();
+     </script>
+ 
+-    <!-- ─── HERO: solo títulos ─── -->
++    <!-- --- HERO: solo t�tulos --- -->
+     <div class="mks-sep-hero">
+         <h2>OFERTAS ESPECIALES</h2>
+         <p>Separatas y promociones exclusivas de nuestra tienda</p>
+     </div>
+ 
+     <?php if (!empty($sep_products)): ?>
+-    <!-- ─── PRODUCTOS DE SEPARATA ─── -->
++    <!-- --- PRODUCTOS DE SEPARATA --- -->
+     <span id="ofertas-especiales-productos"></span>
+-    <p class="mks-sep-section-label">🛒 Productos en oferta especial</p>
++    <p class="mks-sep-section-label">?? Productos en oferta especial</p>
+     <div id="<?php echo esc_attr($prod_grid); ?>" class="woocommerce">
+         <?php
+         wc_setup_loop(array(
+@@ -1488,8 +1558,8 @@ function merkahorro_separatas_shortcode($atts) {
+     <?php endif; ?>
+ 
+     <?php if (!empty($banners)): ?>
+-    <!-- ─── FLYERS / SEPARATAS: Carousel ─── -->
+-    <p class="mks-sep-section-label" style="margin-top:36px;">🗞️ Separatas de la semana</p>
++    <!-- --- FLYERS / SEPARATAS: Carousel --- -->
++    <p class="mks-sep-section-label" style="margin-top:36px;">??? Separatas de la semana</p>
+     <div class="mks-sep-carousel-wrap">
+         <button class="mks-sep-nav-btn mks-sep-nav-prev" id="mks-prev-<?php echo esc_attr($grid_id); ?>" aria-label="Anterior">&#8249;</button>
+         <div id="<?php echo esc_attr($grid_id); ?>">
+@@ -1515,7 +1585,7 @@ function merkahorro_separatas_shortcode($atts) {
+         var modalImg = document.getElementById('mks-sep-modal-img-<?php echo esc_js($grid_id); ?>');
+         if (!carousel) return;
+ 
+-        // Navegación carousel
++        // Navegaci�n carousel
+         if (btnPrev && btnNext) {
+             var cards = carousel.querySelectorAll('.mks-sep-card');
+             if (cards.length > 3) { btnPrev.style.display = 'block'; btnNext.style.display = 'block'; }
+@@ -1561,9 +1631,9 @@ function merkahorro_separatas_shortcode($atts) {
+ }
+ add_shortcode('merkahorro_separatas', 'merkahorro_separatas_shortcode');
+ 
+-// ─── Helper: obtener productos de reglas separata desde wp_wdr_rules ──────────
++// --- Helper: obtener productos de reglas separata desde wp_wdr_rules ----------
+ // Cachea 5 min para no hacer la query en cada pageview.
+-// ─────────────────────────────────────────────────────────────────────────────
++// -----------------------------------------------------------------------------
+ function merkahorro_get_separata_rule_ids() {
+     static $cache = null;
+     if ($cache !== null) return $cache;
+@@ -1582,7 +1652,7 @@ function merkahorro_get_separata_rule_ids() {
+             "SELECT title, filters FROM {$table}
+               WHERE title LIKE %s
+                 AND enabled = '1'
+-                AND CAST(priority AS UNSIGNED) <= 5
++                AND CAST(priority AS UNSIGNED) < 5
+                 AND (date_from IS NULL OR date_from = 0 OR date_from <= %d)
+                 AND (date_to   IS NULL OR date_to   = 0 OR date_to   >= %d)
+               ORDER BY CAST(priority AS UNSIGNED) ASC",
+@@ -1624,22 +1694,22 @@ function merkahorro_get_separata_rule_ids() {
+     return $cache;
+ }
+ 
+-// ═══════════════════════════════════════════════
+-// HOOK: Excluir productos separata de la página /ofertas/
++// -----------------------------------------------
++// HOOK: Excluir productos separata de la p�gina /ofertas/
+ // En /ofertas/ solo deben aparecer productos de reglas semanales (priority > 5).
+-// Los de separata (priority ≤ 5) ya tienen su página en /ofertas-especiales/.
+-// Sniper: activo solo en Villahermosa hasta validar diseño.
+-// ─────────────────────────────────────────────────────────────────────────────
+-// Helper interno: obtiene los IDs a excluir (con caché estático por request)
++// Los de separata (priority = 5) ya tienen su p�gina en /ofertas-especiales/.
++// Sniper: activo solo en Villahermosa hasta validar dise�o.
++// -----------------------------------------------------------------------------
++// Helper interno: obtiene los IDs a excluir (con cach� est�tico por request)
+ function merkahorro_get_separata_ids_to_exclude() {
+     static $ids = null;
+     if ($ids !== null) return $ids;
+     $sep_data = merkahorro_get_separata_rule_ids();
+-    $ids = $sep_data['post_ids']; // ya son únicos y absint desde el helper
++    $ids = $sep_data['post_ids']; // ya son �nicos y absint desde el helper
+     return $ids;
+ }
+ 
+-// Caso A: /ofertas/ usa la query PRINCIPAL de WordPress (página sin shortcode, o con el_content directo)
++// Caso A: /ofertas/ usa la query PRINCIPAL de WordPress (p�gina sin shortcode, o con el_content directo)
+ add_action('pre_get_posts', function($query) {
+     if (!merkahorro_is_dev_sede()) return;
+     if (!$query->is_main_query() || is_admin()) return;
+@@ -1657,7 +1727,7 @@ add_action('pre_get_posts', function($query) {
+ add_filter('woocommerce_shortcode_products_query', function($query_args, $atts, $type) {
+     if (!merkahorro_is_dev_sede()) return $query_args;
+ 
+-    // Verificar que estamos en la página /ofertas/ usando la global $post
++    // Verificar que estamos en la p�gina /ofertas/ usando la global $post
+     global $post;
+     if (!$post || $post->post_name !== 'ofertas') return $query_args;
+ 
+@@ -1670,12 +1740,12 @@ add_filter('woocommerce_shortcode_products_query', function($query_args, $atts,
+ }, 10, 3);
+ 
+ 
+-// ═══════════════════════════════════════════════
+-// PÁGINA DE DESCUENTO DINÁMICA: /promo/descuento/{id}/
++// -----------------------------------------------
++// P�GINA DE DESCUENTO DIN�MICA: /promo/descuento/{id}/
+ // Cuando un banner de descuento lleva a esta URL,
+ // WordPress muestra los productos que aplican para esa regla.
+-// Requiere: Ajustes → Permalinks → guardar (para registrar la rewrite rule)
+-// ═══════════════════════════════════════════════
++// Requiere: Ajustes ? Permalinks ? guardar (para registrar la rewrite rule)
++// -----------------------------------------------
+ add_action('init', function() {
+     // Registrar regla de reescritura: /promo/descuento/123/
+     add_rewrite_rule(
+@@ -1708,31 +1778,31 @@ add_action('template_redirect', function() {
+         }
+     }
+ 
+-    // ── Validar que la regla aplica a esta sede ──
+-    // Cada WordPress es independiente por subdominio, así que verificamos
++    // -- Validar que la regla aplica a esta sede --
++    // Cada WordPress es independiente por subdominio, as� que verificamos
+     // que la regla tenga sedes=null (todas) o incluya la sede actual.
+     $current_sede = merkahorro_get_current_sede();
+     $rule_sedes   = $rule['sedes'] ?? null;
+ 
+     if ($rule !== null && !empty($rule_sedes) && is_array($rule_sedes)) {
+         if ($current_sede && !in_array($current_sede, $rule_sedes, true)) {
+-            // Esta promo no aplica para este subdominio — redirigir a la tienda
++            // Esta promo no aplica para este subdominio � redirigir a la tienda
+             wp_redirect(wc_get_page_permalink('shop') ?: home_url('/'));
+             exit;
+         }
+     }
+ 
+-    // ── Validar que la regla esté activa (habilitada en el gestor) ──
+-    // Si está marcada como inactiva (deshabilitada manualmente) → redirigir.
+-    // Si está activa pero hoy no es su día de descuento → mostrar productos con aviso.
++    // -- Validar que la regla est� activa (habilitada en el gestor) --
++    // Si est� marcada como inactiva (deshabilitada manualmente) ? redirigir.
++    // Si est� activa pero hoy no es su d�a de descuento ? mostrar productos con aviso.
+     if ($rule !== null && empty($rule['active'])) {
+         wp_redirect(wc_get_page_permalink('shop') ?: home_url('/'));
+         exit;
+     }
+ 
+-    // ── Detectar si el descuento aplica HOY o cuándo será el próximo día ──
++    // -- Detectar si el descuento aplica HOY o cu�ndo ser� el pr�ximo d�a --
+     $discount_active_today = true;
+-    $next_discount_label   = '';  // ej: "miércoles 22 de abril"
++    $next_discount_label   = '';  // ej: "mi�rcoles 22 de abril"
+ 
+     if ($rule !== null) {
+         $schedule_type = $rule['schedule_type'] ?? 'days';
+@@ -1741,23 +1811,23 @@ add_action('template_redirect', function() {
+         $date_end      = $rule['date_end'] ?? '';
+ 
+         if ($schedule_type === 'days' && !empty($schedule_days)) {
+-            // schedule_days usa 0=Dom, 1=Lun … 6=Sáb (igual que JS getDay())
+-            $today_dow = (int) date('w'); // PHP date('w'): 0=Dom, 6=Sáb
++            // schedule_days usa 0=Dom, 1=Lun � 6=S�b (igual que JS getDay())
++            $today_dow = (int) date('w'); // PHP date('w'): 0=Dom, 6=S�b
+             $discount_active_today = in_array($today_dow, array_map('intval', $schedule_days), true);
+ 
+             if (!$discount_active_today) {
+-                // Calcular el próximo día que aparece en schedule_days
+-                $day_names_es = array('domingo','lunes','martes','miércoles','jueves','viernes','sábado');
++                // Calcular el pr�ximo d�a que aparece en schedule_days
++                $day_names_es = array('domingo','lunes','martes','mi�rcoles','jueves','viernes','s�bado');
+                 $month_names_es = array('','enero','febrero','marzo','abril','mayo','junio',
+                                         'julio','agosto','septiembre','octubre','noviembre','diciembre');
+                 $sorted_days = array_map('intval', $schedule_days);
+                 sort($sorted_days);
+                 $next_dow = null;
+-                // Buscar el primer día de la semana > hoy
++                // Buscar el primer d�a de la semana > hoy
+                 foreach ($sorted_days as $d) {
+                     if ($d > $today_dow) { $next_dow = $d; break; }
+                 }
+-                // Si no hay ninguno esta semana, tomar el primero de la próxima
++                // Si no hay ninguno esta semana, tomar el primero de la pr�xima
+                 if ($next_dow === null) { $next_dow = $sorted_days[0]; }
+                 $days_ahead = ($next_dow - $today_dow + 7) % 7;
+                 if ($days_ahead === 0) $days_ahead = 7;
+@@ -1774,29 +1844,34 @@ add_action('template_redirect', function() {
+                 $ts = strtotime($date_start);
+                 $next_discount_label = date('j', $ts) . ' de ' . $month_names_es[(int) date('n', $ts)];
+             } elseif (!empty($date_end) && $today_ts > strtotime($date_end)) {
+-                // Rango de fechas ya expiró — redirigir
++                // Rango de fechas ya expir� � redirigir
+                 wp_redirect(wc_get_page_permalink('shop') ?: home_url('/'));
+                 exit;
+             }
+         }
+     }
+ 
+-    // Fallback: mostrar página sin regla
+-    $rule_title      = $rule['title'] ?? 'Productos en Promoción';
++    // Fallback: mostrar p�gina sin regla
++    $rule_title      = $rule['title'] ?? 'Productos en Promoci�n';
+     $applies_to      = $rule['applies_to'] ?? 'all';
+     $applies_to_ids  = $rule['applies_to_ids'] ?? array();
+     $discount_type   = $rule['discount_type'] ?? 'percentage';
+     $discount_value  = $rule['discount_value'] ?? 0;
+ 
+-    // Construir badge de descuento para el título
++    // Convertir IDs for�neos a IDs locales usando el SKU (si aplica a productos)
++    if ($applies_to === 'products') {
++        $applies_to_ids = merkahorro_map_ids_by_sku($applies_to_ids, $rule['applies_to_names'] ?? array());
++    }
++
++    // Construir badge de descuento para el t�tulo
+     if ($discount_type === 'percentage') {
+         $badge_str = $discount_value . '% OFF';
+     } else {
+         $badge_str = '$' . number_format($discount_value, 0, ',', '.') . ' de descuento';
+     }
+ 
+-    // ── Construir WP_Query (reemplaza el shortcode [products] para soportar filtros nativos) ──
+-    // Aplicar parámetros de filtro de URL (compatibles con los widgets de WooCommerce en el sidebar).
++    // -- Construir WP_Query (reemplaza el shortcode [products] para soportar filtros nativos) --
++    // Aplicar par�metros de filtro de URL (compatibles con los widgets de WooCommerce en el sidebar).
+     $paged     = max(1, intval(get_query_var('paged') ?: ($_GET['paged'] ?? 1)));
+     $min_price = isset($_GET['min_price']) ? floatval($_GET['min_price']) : null;
+     $max_price = isset($_GET['max_price']) ? floatval($_GET['max_price']) : null;
+@@ -1825,7 +1900,7 @@ add_action('template_redirect', function() {
+         $query_args['meta_key'] = $ob['meta_key'];
+     }
+ 
+-    // Filtrar por productos o categorías según la regla
++    // Filtrar por productos o categor�as seg�n la regla
+     if ($applies_to === 'products' && !empty($applies_to_ids)) {
+         $query_args['post__in'] = array_map('absint', $applies_to_ids);
+     } elseif ($applies_to === 'categories' && !empty($applies_to_ids)) {
+@@ -1835,7 +1910,7 @@ add_action('template_redirect', function() {
+             'terms'    => array_map('absint', $applies_to_ids),
+         ));
+     } else {
+-        // all — solo productos con precio de venta activo
++        // all � solo productos con precio de venta activo
+         $query_args['meta_query'][] = array(
+             'key'     => '_sale_price',
+             'value'   => '',
+@@ -1859,7 +1934,7 @@ add_action('template_redirect', function() {
+         }
+     }
+ 
+-    // Filtro por categoría adicional desde URL (?filter_cat=123)
++    // Filtro por categor�a adicional desde URL (?filter_cat=123)
+     if (!empty($_GET['filter_cat'])) {
+         $filter_cat_ids = array_map('absint', explode(',', sanitize_text_field($_GET['filter_cat'])));
+         $extra_tax = array('taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => $filter_cat_ids);
+@@ -1875,7 +1950,7 @@ add_action('template_redirect', function() {
+     // Inyectar CSS
+     add_action('wp_head', function() { ?>
+         <style>
+-            /* ─── Hero: título limpio sin cajón azul ─── */
++            /* --- Hero: t�tulo limpio sin caj�n azul --- */
+             .mks-promo-hero {
+                 border-bottom: 3px solid #88dc00;
+                 padding: 32px 20px 26px;
+@@ -1908,7 +1983,7 @@ add_action('template_redirect', function() {
+                 border-radius: 20px;
+             }
+ 
+-            /* ─── Aviso próximo descuento: centrado ─── */
++            /* --- Aviso pr�ximo descuento: centrado --- */
+             .mks-promo-upcoming {
+                 display: flex;
+                 align-items: center;
+@@ -1925,7 +2000,7 @@ add_action('template_redirect', function() {
+             }
+             .mks-promo-upcoming .mks-upcoming-icon { font-size: 1.2rem; flex-shrink: 0; }
+ 
+-            /* ─── Layout principal ─── */
++            /* --- Layout principal --- */
+             .mks-promo-wrap {
+                 display: flex;
+                 gap: 32px;
+@@ -1935,7 +2010,7 @@ add_action('template_redirect', function() {
+                 align-items: flex-start;
+             }
+ 
+-            /* ─── Sidebar con filtros ─── */
++            /* --- Sidebar con filtros --- */
+             .mks-promo-sidebar { flex: 0 0 240px; min-width: 0; }
+             .mks-filter-widget {
+                 background: #fff;
+@@ -1992,7 +2067,7 @@ add_action('template_redirect', function() {
+             }
+             .mks-filter-chip a { color: #88dc00; text-decoration: none; font-weight: 800; }
+ 
+-            /* ─── Contenido principal ─── */
++            /* --- Contenido principal --- */
+             .mks-promo-main { flex: 1 1 0; min-width: 0; }
+             .mks-promo-toolbar {
+                 display: flex; align-items: center; justify-content: space-between;
+@@ -2009,7 +2084,7 @@ add_action('template_redirect', function() {
+         </style>
+     <?php }, 99);
+ 
+-    // Recopilar categorías de los productos de esta promo para el filtro lateral
++    // Recopilar categor�as de los productos de esta promo para el filtro lateral
+     $promo_cats = array();
+     if ($applies_to === 'products' && !empty($applies_to_ids)) {
+         foreach (array_slice($applies_to_ids, 0, 60) as $pid) {
+@@ -2036,8 +2111,8 @@ add_action('template_redirect', function() {
+     $active_max = isset($_GET['max_price']) ? floatval($_GET['max_price']) : '';
+     $has_price_filter = ($active_min !== '' || $active_max !== '');
+ 
+-    // Forzar el <title> de la pestaña para esta página custom.
+-    // Sin esto WordPress usa el título de otra página (la que tenga el query por defecto).
++    // Forzar el <title> de la pesta�a para esta p�gina custom.
++    // Sin esto WordPress usa el t�tulo de otra p�gina (la que tenga el query por defecto).
+     add_filter('document_title_parts', function($title) use ($rule_title) {
+         $title['title'] = preg_replace('/^\[MK-Gestor\]\s*/i', '', $rule_title);
+         return $title;
+@@ -2046,22 +2121,22 @@ add_action('template_redirect', function() {
+     get_header();
+     ?>
+ 
+-        <!-- ─── HERO: título limpio ─── -->
++        <!-- --- HERO: t�tulo limpio --- -->
+         <div class="mks-promo-hero">
+             <h1><?php echo esc_html($rule_title); ?></h1>
+             <?php if ($discount_active_today && $discount_value > 0): ?>
+                 <div class="mks-promo-badge"><?php echo esc_html($badge_str); ?></div>
+             <?php elseif (!$discount_active_today): ?>
+                 <div class="mks-promo-badge-upcoming">
+-                    🕐 Próximo: <?php echo esc_html($next_discount_label ?: 'próximamente'); ?>
++                    ?? Pr�ximo: <?php echo esc_html($next_discount_label ?: 'pr�ximamente'); ?>
+                 </div>
+             <?php endif; ?>
+         </div>
+ 
+-        <!-- ─── Aviso próximo descuento (centrado) ─── -->
++        <!-- --- Aviso pr�ximo descuento (centrado) --- -->
+         <?php if (!$discount_active_today): ?>
+         <div class="mks-promo-upcoming">
+-            <span class="mks-upcoming-icon">🗓️</span>
++            <span class="mks-upcoming-icon">???</span>
+             <span>
+                 Hoy estos productos <strong>no tienen descuento activo</strong>.
+                 <?php if ($next_discount_label): ?>
+@@ -2074,22 +2149,22 @@ add_action('template_redirect', function() {
+ 
+         <div class="mks-promo-wrap woocommerce">
+ 
+-            <!-- ─── SIDEBAR: filtros propios ─── -->
++            <!-- --- SIDEBAR: filtros propios --- -->
+             <aside class="mks-promo-sidebar">
+ 
+                 <?php if ($has_price_filter): ?>
+                 <div class="mks-active-filters">
+                     <span class="mks-filter-chip">
+                         $<?php echo number_format((float)$active_min, 0, ',', '.'); ?>
+-                        – $<?php echo number_format((float)$active_max, 0, ',', '.'); ?>
+-                        <a href="<?php echo esc_url(add_query_arg(array('min_price'=>false,'max_price'=>false,'paged'=>false))); ?>">✕</a>
++                        � $<?php echo number_format((float)$active_max, 0, ',', '.'); ?>
++                        <a href="<?php echo esc_url(add_query_arg(array('min_price'=>false,'max_price'=>false,'paged'=>false))); ?>">?</a>
+                     </span>
+                 </div>
+                 <?php endif; ?>
+ 
+                 <!-- Precio -->
+                 <div class="mks-filter-widget">
+-                    <p class="mks-filter-widget-title">💰 Filtrar por precio</p>
++                    <p class="mks-filter-widget-title">?? Filtrar por precio</p>
+                     <form method="get">
+                         <?php foreach ($_GET as $k => $v):
+                             if (in_array($k, array('min_price','max_price','paged'), true)) continue;
+@@ -2098,19 +2173,19 @@ add_action('template_redirect', function() {
+                         <div class="mks-price-inputs">
+                             <span style="font-size:.8rem;color:#888">$</span>
+                             <input class="mks-price-input" type="number" name="min_price"
+-                                   value="<?php echo esc_attr($active_min); ?>" placeholder="Mín" min="0" step="500">
+-                            <span class="mks-price-sep">—</span>
++                                   value="<?php echo esc_attr($active_min); ?>" placeholder="M�n" min="0" step="500">
++                            <span class="mks-price-sep">�</span>
+                             <input class="mks-price-input" type="number" name="max_price"
+-                                   value="<?php echo esc_attr($active_max); ?>" placeholder="Máx" min="0" step="500">
++                                   value="<?php echo esc_attr($active_max); ?>" placeholder="M�x" min="0" step="500">
+                         </div>
+                         <button type="submit" class="mks-price-apply">Aplicar filtro</button>
+                     </form>
+                 </div>
+ 
+-                <!-- Categorías (si hay más de una) -->
++                <!-- Categor�as (si hay m�s de una) -->
+                 <?php if (count($promo_cats) > 1): ?>
+                 <div class="mks-filter-widget">
+-                    <p class="mks-filter-widget-title">📂 Categorías</p>
++                    <p class="mks-filter-widget-title">?? Categor�as</p>
+                     <ul class="mks-cat-list">
+                         <?php foreach ($promo_cats as $cat_id => $cat): ?>
+                         <li>
+@@ -2125,27 +2200,9 @@ add_action('template_redirect', function() {
+                 </div>
+                 <?php endif; ?>
+ 
+-                <!-- Ordenar -->
+-                <div class="mks-filter-widget">
+-                    <p class="mks-filter-widget-title">↕ Ordenar por</p>
+-                    <form method="get" action="<?php echo esc_url(strtok($_SERVER['REQUEST_URI'], '?')); ?>">
+-                        <?php foreach ($_GET as $k => $v):
+-                            if ($k === 'orderby') continue;
+-                            echo '<input type="hidden" name="' . esc_attr($k) . '" value="' . esc_attr($v) . '">';
+-                        endforeach; ?>
+-                        <select class="mks-sort-select" name="orderby" onchange="this.form.submit()">
+-                            <option value="menu_order"<?php selected($orderby_raw,'menu_order'); ?>>Orden predeterminado</option>
+-                            <option value="popularity"<?php selected($orderby_raw,'popularity'); ?>>Popularidad</option>
+-                            <option value="date"<?php selected($orderby_raw,'date'); ?>>Más recientes</option>
+-                            <option value="price"<?php selected($orderby_raw,'price'); ?>>Precio: menor a mayor</option>
+-                            <option value="price-desc"<?php selected($orderby_raw,'price-desc'); ?>>Precio: mayor a menor</option>
+-                        </select>
+-                    </form>
+-                </div>
+-
+             </aside>
+ 
+-            <!-- ─── CONTENIDO PRINCIPAL ─── -->
++            <!-- --- CONTENIDO PRINCIPAL --- -->
+             <main class="mks-promo-main">
+ 
+                 <div class="mks-promo-toolbar">
+@@ -2154,7 +2211,7 @@ add_action('template_redirect', function() {
+                         $total = $promo_loop->found_posts;
+                         if ($total > 0) {
+                             printf(
+-                                'Mostrando %d–%d de %d resultado%s',
++                                'Mostrando %d�%d de %d resultado%s',
+                                 ($paged - 1) * 12 + 1,
+                                 min($paged * 12, $total),
+                                 $total,
+@@ -2167,9 +2224,9 @@ add_action('template_redirect', function() {
+ 
+                 <?php if ($promo_loop->have_posts()): ?>
+                     <?php
+-                    // Configurar el loop de WooCommerce con los datos de paginación correctos.
++                    // Configurar el loop de WooCommerce con los datos de paginaci�n correctos.
+                     // woocommerce_pagination() usa wc_get_loop_prop('total_pages') internamente,
+-                    // por eso hay que llamar wc_setup_loop() — no alcanza con swapear $wp_query.
++                    // por eso hay que llamar wc_setup_loop() � no alcanza con swapear $wp_query.
+                     wc_setup_loop(array(
+                         'total'       => $promo_loop->found_posts,
+                         'total_pages' => $promo_loop->max_num_pages,
+@@ -2184,7 +2241,7 @@ add_action('template_redirect', function() {
+                     <?php woocommerce_product_loop_end(); ?>
+                     <?php wp_reset_postdata(); wc_reset_loop(); ?>
+ 
+-                    <!-- Paginación con URL explícita — woocommerce_pagination() usa get_pagenum_link()
++                    <!-- Paginaci�n con URL expl�cita � woocommerce_pagination() usa get_pagenum_link()
+                          que no funciona con rewrite custom. Usamos paginate_links() directamente
+                          con add_query_arg para generar ?paged=X sobre la URL actual. -->
+                     <?php if ($promo_loop->max_num_pages > 1): ?>
+@@ -2206,7 +2263,7 @@ add_action('template_redirect', function() {
+ 
+                 <?php else: ?>
+                     <?php wp_reset_postdata(); ?>
+-                    <p class="woocommerce-info">No hay productos disponibles para esta promoción en este momento.</p>
++                    <p class="woocommerce-info">No hay productos disponibles para esta promoci�n en este momento.</p>
+                 <?php endif; ?>
+ 
+             </main>
+@@ -2218,11 +2275,11 @@ add_action('template_redirect', function() {
+     exit;
+ });
+ 
+-// Registrar la rewrite rule solo si aún no está presente en las reglas activas.
++// Registrar la rewrite rule solo si a�n no est� presente en las reglas activas.
+ // - get_option('rewrite_rules') es autoloaded por WordPress (costo cero extra).
+ // - flush_rewrite_rules(false) solo actualiza la BD, NO reescribe .htaccess.
+-// - Esto evita el race condition de múltiples workers ejecutando el flush
+-//   simultáneamente al desplegar el plugin por primera vez.
++// - Esto evita el race condition de m�ltiples workers ejecutando el flush
++//   simult�neamente al desplegar el plugin por primera vez.
+ add_action('wp_loaded', function() {
+     $rules = get_option('rewrite_rules');
+     if (empty($rules) || !array_key_exists('^promo/descuento/([0-9]+)/?$', $rules)) {
+@@ -2230,38 +2287,38 @@ add_action('wp_loaded', function() {
+     }
+ });
+ 
+-// ═══════════════════════════════════════════════
+-// BADGE DE OFERTA: Reemplazo del "¡Oferta!" por defecto de WooCommerce
+-// Reemplaza el texto genérico por un badge con los colores de Merkahorro
++// -----------------------------------------------
++// BADGE DE OFERTA: Reemplazo del "�Oferta!" por defecto de WooCommerce
++// Reemplaza el texto gen�rico por un badge con los colores de Merkahorro
+ // y muestra el porcentaje de descuento real del producto.
+-// ═══════════════════════════════════════════════
++// -----------------------------------------------
+ 
+ // Aplicar estilos Merkahorro SOLO a los badges de descuento por valor fijo.
+-// Prioridad 999 = corre al final, después de que Flycart ya haya modificado el HTML
++// Prioridad 999 = corre al final, despu�s de que Flycart ya haya modificado el HTML
+ // de las reglas por porcentaje.
+-// Lógica: si el $html ya contiene "%" → Flycart lo manejó → no tocar.
+-//         si no tiene "%" → es el badge genérico de WooCommerce ("¡Oferta!") → reemplazar.
++// L�gica: si el $html ya contiene "%" ? Flycart lo manej� ? no tocar.
++//         si no tiene "%" ? es el badge gen�rico de WooCommerce ("�Oferta!") ? reemplazar.
+ add_filter('woocommerce_sale_flash', function($html, $post, $product) {
+-    // Flycart/AWDR ya aplicó un badge con porcentaje — no interferir
++    // Flycart/AWDR ya aplic� un badge con porcentaje � no interferir
+     if (strpos($html, '%') !== false) {
+         return $html;
+     }
+-    // Badge nativo de WooCommerce (descuento por valor fijo) — aplicar branding
++    // Badge nativo de WooCommerce (descuento por valor fijo) � aplicar branding
+     return '<span class="onsale mks-fixed-sale">Oferta Separata</span>';
+ }, 999, 3);
+ 
+-// Inyectar CSS en el frontend (una sola vez, peso mínimo)
++// Inyectar CSS en el frontend (una sola vez, peso m�nimo)
+ // IMPORTANTE: Solo apuntamos a .mks-fixed-sale (clase que solo nosotros inyectamos).
+-// El .onsale genérico NO se toca para no interferir con el badge de Flycart en reglas %.
++// El .onsale gen�rico NO se toca para no interferir con el badge de Flycart en reglas %.
+ add_action('wp_head', function() { ?>
+ <style>
+-/* ─── Badge de oferta Merkahorro (solo descuentos por valor fijo) ─── */
++/* --- Badge de oferta Merkahorro (solo descuentos por valor fijo) --- */
+ span.mks-fixed-sale,
+ .woocommerce span.mks-fixed-sale,
+ .woocommerce-page span.mks-fixed-sale,
+ ul.products li.product .mks-fixed-sale,
+ .woocommerce ul.products li.product .mks-fixed-sale {
+-    /* Posición */
++    /* Posici�n */
+     position: absolute;
+     top: 12px;
+     left: 12px;
+@@ -2279,7 +2336,7 @@ ul.products li.product .mks-fixed-sale,
+     /* Colores Merkahorro */
+     background: #160857 !important;
+     color: #88dc00 !important;
+-    /* Tipografía */
++    /* Tipograf�a */
+     font-size: 0.78rem;
+     font-weight: 800;
+     letter-spacing: .04em;
+@@ -2291,3 +2348,173 @@ ul.products li.product .mks-fixed-sale,
+ }
+ </style>
+ <?php }, 20);
++// -----------------------------------------------------------------------
++// Auto-inject antes del loop en la categor�a descuentos-especiales
++// -----------------------------------------------------------------------
++add_action('woocommerce_before_shop_loop', function () {
++    if (! is_product_category('descuentos-especiales')) return;
++    echo do_shortcode('[merkahorro_discount_tiles]');
++}, 5);
++
++// -----------------------------------------------------------------------
++// Shortcode [merkahorro_discount_tiles]
++// -----------------------------------------------------------------------
++add_shortcode('merkahorro_discount_tiles', 'merkahorro_discount_tiles_shortcode');
++
++function merkahorro_discount_tiles_shortcode($atts) {
++    $atts = shortcode_atts(['sede' => null], $atts, 'merkahorro_discount_tiles');
++
++    $sede = $atts['sede'] ?: merkahorro_get_current_sede();
++    $cache_key = 'mks_discount_tiles_' . sanitize_key($sede ?: 'all');
++
++    $tiles = get_transient($cache_key);
++
++    if (false === $tiles) {
++        $api_url = MERKAHORRO_API_URL . '/content/banners?section=discount_tiles';
++        if ($sede) {
++            $api_url .= '&sede=' . urlencode($sede);
++        }
++
++        $response = wp_remote_get($api_url, [
++            'timeout' => 10,
++            'headers' => ['x-api-key' => MERKAHORRO_API_KEY],
++            'sslverify' => false
++        ]);
++
++        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
++            return '<!-- merkahorro_discount_tiles: error al cargar -->';
++        }
++
++        $body = json_decode(wp_remote_retrieve_body($response), true);
++        $tiles = $body['data'] ?? [];
++        set_transient($cache_key, $tiles, MERKAHORRO_CACHE_TTL);
++    }
++
++    $tiles = array_values(array_filter($tiles, fn($t) => !empty($t['active'])));
++    if (empty($tiles)) return '';
++
++    usort($tiles, fn($a, $b) => ($a['display_order'] ?? 0) - ($b['display_order'] ?? 0));
++
++    $uid = 'mks-dtiles-' . substr(md5($sede . time()), 0, 6);
++
++    ob_start();
++    ?>
++    <style>
++        .mks-tiles-wrap { position: relative; margin: 16px 0 0; }
++        .mks-tiles { display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px 0 12px; }
++        .mks-tiles::-webkit-scrollbar { display: none; }
++        .mks-tile { flex: 0 0 calc(20% - 12px); scroll-snap-align: start; border-radius: 14px; overflow: hidden; transition: transform 0.25s ease, box-shadow 0.25s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
++        .mks-tile:hover { transform: translateY(-4px); box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
++        .mks-tile img { width: 100%; height: auto; display: block; opacity: 0; transition: opacity 0.4s ease; }
++        .mks-tile img.mks-loaded { opacity: 1; }
++        .mks-tile a { display: block; text-decoration: none; }
++        .mks-tiles-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; background: rgba(0,0,0,0.4); color: white; border: none; font-size: 1.3rem; padding: 10px 14px; cursor: pointer; border-radius: 6px; transition: background 0.2s; }
++        .mks-tiles-nav:hover { background: rgba(0,0,0,0.7); }
++        .mks-tiles-prev { left: -6px; }
++        .mks-tiles-next { right: -6px; }
++        @media (min-width: 1024px) { .mks-tiles-wrap.fits-all .mks-tiles-nav { display: none; } }
++        @media (max-width: 1023px) { .mks-tile { flex: 0 0 calc(33.333% - 10px); } }
++        @media (max-width: 600px) { .mks-tile { flex: 0 0 calc(50% - 8px); } .mks-tiles { gap: 10px; } .mks-tiles-nav { padding: 6px 10px; font-size: 1rem; } }
++
++        /* --- Lightbox modal para tiles --- */
++        .mks-tile-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 99999; align-items: center; justify-content: center; padding: 20px; }
++        .mks-tile-modal-overlay.active { display: flex; }
++        .mks-tile-modal-inner { position: relative; max-width: 90vw; max-height: 90vh; }
++        .mks-tile-modal-inner img { max-width: 100%; max-height: 90vh; border-radius: 10px; display: block; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
++        .mks-tile-modal-close { position: absolute; top: -14px; right: -14px; background: #88dc00; color: #160857; border: none; border-radius: 50%; width: 34px; height: 34px; font-size: 1.2rem; font-weight: 900; cursor: pointer; line-height: 34px; text-align: center; padding: 0; }
++    </style>
++    <div class="mks-tiles-wrap" id="<?php echo esc_attr($uid); ?>">
++      <div class="mks-tiles">
++        <?php foreach ($tiles as $tile) :
++          $href    = esc_url($tile['link_url'] ?? '#');
++          $img     = esc_url($tile['image_url'] ?? '');
++          $alt     = esc_attr($tile['alt_text'] ?? $tile['title'] ?? '');
++          $label   = esc_html($tile['label'] ?? $tile['title'] ?? '');
++        ?>
++        <div class="mks-tile">
++          <a href="<?php echo $href; ?>" class="mks-tile-link" data-img="<?php echo $img; ?>" data-url="<?php echo $href; ?>">
++            <?php if ($img) : ?>
++              <img src="<?php echo $img; ?>" alt="<?php echo $alt; ?>" loading="lazy" class="mks-loaded" />
++            <?php endif; ?>
++            <?php if ($label) : ?>
++              <span class="mks-tile-label" style="display:block;text-align:center;font-size:0.85rem;font-weight:700;color:#160857;padding:5px 0;"><?php echo $label; ?></span>
++            <?php endif; ?>
++          </a>
++        </div>
++        <?php endforeach; ?>
++      </div>
++      <button class="mks-tiles-nav mks-tiles-prev" aria-label="Anterior">&#8249;</button>
++      <button class="mks-tiles-nav mks-tiles-next" aria-label="Siguiente">&#8250;</button>
++    </div>
++
++    <!-- Lightbox overlay para tiles -->
++    <div class="mks-tile-modal-overlay" id="mks-tile-modal-<?php echo esc_attr($uid); ?>">
++        <div class="mks-tile-modal-inner">
++            <button class="mks-tile-modal-close" aria-label="Cerrar">?</button>
++            <a href="#" id="mks-tile-modal-link-<?php echo esc_attr($uid); ?>">
++                <img src="" alt="Tile" id="mks-tile-modal-img-<?php echo esc_attr($uid); ?>">
++            </a>
++        </div>
++    </div>
++
++    <script>
++    (function() {
++        var wrap  = document.getElementById('<?php echo esc_js($uid); ?>');
++        if (!wrap) return;
++        var track = wrap.querySelector('.mks-tiles');
++        var prev  = wrap.querySelector('.mks-tiles-prev');
++        var next  = wrap.querySelector('.mks-tiles-next');
++        var tile  = track.querySelector('.mks-tile');
++        if (!tile) return;
++
++        function getScrollAmount() { return tile.offsetWidth + 14; }
++        function checkFits() {
++            if (track.scrollWidth <= track.clientWidth + 2) wrap.classList.add('fits-all');
++            else wrap.classList.remove('fits-all');
++        }
++
++        if (prev) prev.addEventListener('click', function() { track.scrollBy({ left: -getScrollAmount(), behavior: 'smooth' }); });
++        if (next) next.addEventListener('click', function() { track.scrollBy({ left:  getScrollAmount(), behavior: 'smooth' }); });
++
++        checkFits();
++        window.addEventListener('resize', checkFits);
++
++        // --- Logica Modal Tiles ---
++        var overlay = document.getElementById('mks-tile-modal-' + '<?php echo esc_js($uid); ?>');
++        var modalImg = document.getElementById('mks-tile-modal-img-' + '<?php echo esc_js($uid); ?>');
++
++        if (overlay && modalImg) {
++            track.addEventListener('click', function(e) {
++                var link = e.target.closest('a.mks-tile-link');
++                if (!link) return;
++                
++                var url = link.getAttribute('data-url');
++                
++                if (!url || url === '#' || url.trim() === '') {
++                    e.preventDefault();
++                    modalImg.src = link.getAttribute('data-img') || '';
++                    overlay.classList.add('active');
++                    document.body.style.overflow = 'hidden';
++                }
++            });
++
++            overlay.addEventListener('click', function(e){
++                if (e.target === overlay || e.target.classList.contains('mks-tile-modal-close') || e.target.closest('.mks-tile-modal-close')) {
++                    e.preventDefault();
++                    overlay.classList.remove('active');
++                    document.body.style.overflow = '';
++                }
++            });
++
++            document.addEventListener('keydown', function(e){
++                if (e.key === 'Escape' && overlay.classList.contains('active')) {
++                    overlay.classList.remove('active');
++                    document.body.style.overflow = '';
++                }
++            });
++        }
++    })();
++    </script>
++    <?php
++    return ob_get_clean();
++}
+

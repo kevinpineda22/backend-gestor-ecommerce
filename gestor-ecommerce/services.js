@@ -312,3 +312,45 @@ export async function awdrPostSettings(sedeCode, payload) {
   });
   return res.json();
 }
+
+// --- TILES DE DESCUENTOS ESPECIALES ---
+export async function fetchDiscountCategoryTiles(sede = null) {
+  const url = sede ? `${API_URL}/content/discount-tiles?sede=${sede}` : `${API_URL}/content/discount-tiles`;
+  const res = await fetch(url);
+  return res.json();
+}
+
+export async function createDiscountCategoryTile(data) {
+  const res = await fetch(`${API_URL}/content/discount-tiles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function updateDiscountCategoryTile(id, data) {
+  const res = await fetch(`${API_URL}/content/discount-tiles/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+
+export async function deleteDiscountCategoryTile(id) {
+  const res = await fetch(`${API_URL}/content/discount-tiles/${id}`, {
+    method: "DELETE",
+  });
+  return res.json();
+}
+
+export async function reorderDiscountCategoryTiles(orderedIds) {
+  const res = await fetch(`${API_URL}/content/discount-tiles/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderedIds }),
+  });
+  return res.json();
+}
+

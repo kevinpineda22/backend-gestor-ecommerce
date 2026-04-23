@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { fetchBanners, createBanner, updateBanner, deleteBanner, uploadImage, fetchDiscountRules, SEDE_WP_URLS } from "../services";
+
 import "../GestorEcommerce.css";
 import "./BannerManager.css";
 const SECTIONS = [
   { key: "home_slider", label: "🖼️ Slider Principal", desc: "Banner grande rotativo del inicio" },
   { key: "home_tiles", label: "🏷️ Tiles Promocionales", desc: "Cuadros pequeños debajo del slider" },
   { key: "promo_separatas", label: "📋 Separatas Promo", desc: "Tarjetas de separatas y flyers promocionales" },
+  { key: "discount_tiles", label: "🏷️ Tiles Descuentos Esp.", desc: "Tiles en /descuentos-especiales/ por sede" },
 ];
 
 // Genera la URL relativa de la página de promo — funciona en cualquier subdominio de sede
@@ -61,15 +63,17 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
     setLoading(true);
     try {
       // Cargar todas las secciones en paralelo
-      const [sliderRes, tilesRes, separatasRes] = await Promise.all([
+      const [sliderRes, tilesRes, separatasRes, dtilesRes] = await Promise.all([
         fetchBanners("home_slider"),
         fetchBanners("home_tiles"),
         fetchBanners("promo_separatas"),
+        fetchBanners("discount_tiles"),
       ]);
       const combined = [
         ...(sliderRes.ok ? sliderRes.data || [] : []),
         ...(tilesRes.ok ? tilesRes.data || [] : []),
         ...(separatasRes.ok ? separatasRes.data || [] : []),
+          ...(dtilesRes.ok ? dtilesRes.data || [] : []),
       ];
       setAllBanners(combined);
     } catch (err) {
@@ -312,7 +316,6 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
         </div>
       </div>
 
-      {/* Filtro por sede + preview toggle */}
       <div className="bm-filter-bar" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
         {esAdminGlobal && sedes.length > 1 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -353,12 +356,12 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
           </div>
         )}
 
-        <button
-          className="bm-preview-toggle-btn"
-          onClick={() => { setShowPreview(true); setCurrentSlide(0); }}
-        >
-          👁️ Vista Previa Tienda
-        </button>
+<button
+            className="bm-preview-toggle-btn"
+            onClick={() => { setShowPreview(true); setCurrentSlide(0); }}
+          >
+            👁️ Vista Previa Tienda
+          </button>
       </div>
 
       {/* ══════════ MODAL STOREFRONT PREVIEW ══════════ */}
@@ -461,12 +464,15 @@ export default function BannerManager({ sedes = [], sedeActual = null, esAdminGl
             <div className="ge-tab-label">{sec.label}</div>
             <div className="ge-tab-desc">{sec.desc}</div>
             <div className="ge-tab-count">
-              {allBanners.filter(b => b.section === sec.key).length} banners
-              · {allBanners.filter(b => b.section === sec.key && b.active).length} activos
+              {sec.key === 'discount_tiles'
+                ? 'tiles por sede'
+                : `${allBanners.filter(b => b.section === sec.key).length} banners · ${allBanners.filter(b => b.section === sec.key && b.active).length} activos`}
             </div>
           </button>
         ))}
       </div>
+
+      
 
       {/* Formulario */}
       {showForm && (

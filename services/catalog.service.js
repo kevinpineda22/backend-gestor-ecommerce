@@ -1,8 +1,65 @@
-import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients, getProductVariations } from "./woo.service.js";
+import { getWooProducts, getWooPricesByIds, getWooPricesBySkus, getWooClientForSede, getAllSedeWooClients, getProductVariations, getCategories } from "./woo.service.js";
 import supabase from "../supabaseClient.js";
 import wooApi from "./woo.service.js";
 import { getLivePriceForItem, getAllPricesForItem } from "./siesa/siesa.prices.js";
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
+
+// Caché para mapeo de categorías multi-sede (Evita bloqueos de límite de API)
+const _multiSedeCatCache = {};
+
+async function mapCategoryIdsToSede(sourceIds, targetSedeCode, targetClient) {
+  if (!sourceIds || sourceIds.length === 0) return sourceIds;
+  try {
+    const pv001CatsRes = await getCategories(); // Categories from PV001
+    if (!pv001CatsRes.ok) return sourceIds;
+    const pv001Cats = pv001CatsRes.data;
+
+    // Load target sede categories if not in cache (Inicializar rama)
+    if (!_multiSedeCatCache[targetSedeCode]) {
+      _multiSedeCatCache[targetSedeCode] = {};
+    }
+    
+    const targetCache = _multiSedeCatCache[targetSedeCode];
+    const mappedCategories = [];
+    
+    for (const sourceIdObj of sourceIds) {
+      const idNum = Number(sourceIdObj.id);
+      const pv001Cat = pv001Cats.find(c => c.id === idNum);
+      
+      if (pv001Cat && pv001Cat.name) {
+        const catName = pv001Cat.name;
+        const lowerName = catName.toLowerCase();
+        
+        // Si ya mapeamos esta categoría en esta sede, usar la caché
+        if (targetCache[lowerName]) {
+          mappedCategories.push({ id: targetCache[lowerName] });
+          continue;
+        }
+
+        // Búsqueda específica y ligera por nombre
+        try {
+          const searchRes = await targetClient.get("/products/categories", { params: { search: catName } });
+          const tgtCat = searchRes.data.find(tc => tc.name.toLowerCase() === lowerName);
+          
+          if (tgtCat) {
+            targetCache[lowerName] = tgtCat.id;
+            mappedCategories.push({ id: tgtCat.id });
+          } else {
+            mappedCategories.push({ id: idNum }); // Fallback a original
+          }
+        } catch (searchErr) {
+          mappedCategories.push({ id: idNum }); // Fallback a original
+        }
+      } else {
+        mappedCategories.push({ id: idNum }); // Fallback a original
+      }
+    }
+    return mappedCategories;
+  } catch (e) {
+    console.error(`Error mapeando categorias para ${targetSedeCode}:`, e.message);
+    return sourceIds;
+  }
+}
 
 export async function debugSkuStatus(sku) {
   const report = {
@@ -583,21 +640,21 @@ export async function updateProductInWoo(wooId, data) {
     payload.images = [{ src: data.image_url.trim() }];
   }
 
-  // Manejo de Categorías (Array de IDs)
+  // Manejo de Categorías (Array de IDs) - Convertir a número estricto
   if (data.categories && Array.isArray(data.categories)) {
-      // Woo espera: categories: [ { id: 10 }, { id: 15 } ]
-      payload.categories = data.categories.map(id => ({ id }));
+      // Woo espera: categories: [ { id: 10 }, { id: 15 } ] y el id tipo entero
+      payload.categories = data.categories.map(id => ({ id: Number(id) }));
   }
 
   // Manejo de Etiquetas/Marcas (Array de IDs)
   if (data.tags && Array.isArray(data.tags)) {
-      // Woo espera: tags: [ { id: 10 }, { id: 15 } ]
-      payload.tags = data.tags.map(id => ({ id }));
+      // Woo espera: tags: [ { id: 10 }, { id: 15 } ] y el id tipo entero
+      payload.tags = data.tags.map(id => ({ id: Number(id) }));
   }
 
   // Manejo de Brands (Taxonomía personalizada)
   if (data.brands && Array.isArray(data.brands)) {
-      payload.brands = data.brands.map(id => ({ id }));
+      payload.brands = data.brands.map(id => ({ id: Number(id) }));
   }
 
   // Manejo de PUM (Precio por Unidad de Medida) via meta_data
@@ -681,7 +738,14 @@ export async function updateProductInWoo(wooId, data) {
         }
 
         if (productId) {
-          const sedePayload = sedeCode === "PV001" ? payload : payloadOtherSedes;
+          const sedePayload = sedeCode === "PV001" ? payload : { ...payloadOtherSedes };
+          
+          if (sedeCode !== "PV001" && sedePayload.categories && sedePayload.categories.length > 0) {
+              const mappedCats = await mapCategoryIdsToSede(sedePayload.categories, sedeCode, client);
+              if (mappedCats.length > 0) sedePayload.categories = mappedCats;
+              else delete sedePayload.categories; // Si no encuentra mapeo, no enviar categorias erróneas
+          }
+
           const response = await client.put(`/products/${productId}`, sedePayload);
           console.log(`✅ Producto actualizado en sede ${sedeCode} (id=${productId})`);
           return { sede: sedeCode, ok: true, response: sedeCode === "PV001" ? response.data : null };
@@ -810,22 +874,19 @@ export async function createProductInWoo(data) {
           payload.images = [{ src: data.image_url.trim() }];
       }
 
-      // Categorías
+      // Categorías - WooCommerce REST API requiere que el id sea Number, no string
       if (data.categories && Array.isArray(data.categories)) {
-          payload.categories = data.categories.map(id => ({ id }));
+          payload.categories = data.categories.map(id => ({ id: Number(id) }));
       }
 
       // Tags estándar
       if (data.tags && Array.isArray(data.tags)) {
-        payload.tags = data.tags.map(id => ({ id }));
+        payload.tags = data.tags.map(id => ({ id: Number(id) }));
       }
       
-      // Brands (si el plugin YITH Brands usa taxonomía)
-      // Nota: A veces Woo requiere que vengan en atributos o en un campo especial, pero intentamos taxonomía
-      // Si marcas son 'pa_brand' o similar, ajuste necesario. Aquí asumimos la estructura estándar
+      // Brands
       if (data.brands && Array.isArray(data.brands)) {
-           // Algunos plugins usan 'brands' como campo top-level
-           payload.brands = data.brands.map(id => ({ id }));
+           payload.brands = data.brands.map(id => ({ id: Number(id) }));
       }
 
       // PUM (Precio por Unidad de Medida) via meta_data
@@ -884,6 +945,13 @@ export async function createProductInWoo(data) {
               stock_quantity: sStock,
               regular_price: sPrice ? String(sPrice) : undefined
             };
+
+            // Mapear categorías para la sede actual basado en nombres de PV001
+            if (sedePayload.categories && sedePayload.categories.length > 0) {
+              const mappedCats = await mapCategoryIdsToSede(sedePayload.categories, sedeCode, client);
+              if (mappedCats.length > 0) sedePayload.categories = mappedCats;
+              else delete sedePayload.categories; // evitar fallback por defecto si no mapea
+            }
 
             const sedeRes = await client.post("/products", sedePayload);
             console.log(`✅ Producto creado en sede ${sedeCode}: ${sedeRes.data.id} (stock=${sStock}, price=${sPrice})`);
