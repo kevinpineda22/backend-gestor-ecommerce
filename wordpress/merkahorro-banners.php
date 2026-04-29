@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Plugin Name: Merkahorro Banners - EcomManager Integration
  * Description: Renderiza sliders y tiles promocionales desde el Gestor Ecommerce (Supabase API).
@@ -15,24 +15,6 @@
  */
 
 if (!defined('ABSPATH')) exit;
-
-// ═══════════════════════════════════════════════
-// SOPORTE CORS SEGURO PARA LA API REST
-// Integrado nativamente en WP, no bloquea funciones ni procesos de otros plugins
-// ═══════════════════════════════════════════════
-add_action('rest_api_init', function() {
-    add_filter('rest_pre_serve_request', function($value) {
-        $uri = $_SERVER['REQUEST_URI'] ?? '';
-        if (strpos($uri, '/merkahorro/v1/') !== false) {
-            $origin = get_http_origin() ?: '*';
-            header('Access-Control-Allow-Origin: ' . esc_url_raw($origin));
-            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-            header('Access-Control-Allow-Credentials: true');
-            header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Requested-With, Origin, Accept');
-        }
-        return $value;
-    }, 99);
-});
 
 // ═══════════════════════════════════════════════
 // CONFIGURACIÓN
@@ -154,6 +136,8 @@ function merkahorro_get_banners($section = 'home_slider', $sede = null) {
     if ($sede) {
         $url .= '&sede=' . urlencode($sede);
     }
+    // Evitar caché de Vercel/proxies intermedios añadiendo un timestamp
+    $url .= (strpos($url, '?') !== false ? '&' : '?') . 't=' . time();
 
     $response = wp_remote_get($url, array(
         'timeout' => 10,
@@ -443,14 +427,32 @@ add_action('rest_api_init', function() {
         'methods' => 'GET',
         'callback' => function() {
             global $wpdb;
-            // Limpiar todos los transients de merkahorro (banners + descuentos)
+            // Limpiar todos los transients de merkahorro (banners + descuentos y tiles)
             $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
-                    '_transient_merkahorro_%',
-                    '_transient_timeout_merkahorro_%'
-                )
+                "DELETE FROM {$wpdb->options}
+                 WHERE option_name LIKE '\_transient\_merkahorro\_%'
+                    OR option_name LIKE '\_transient\_timeout\_merkahorro\_%'
+                    OR option_name LIKE '\_transient\_mks\_%'
+                    OR option_name LIKE '\_transient\_timeout\_mks\_%'"
             );
+            
+            // Si el sitio tiene caché de objetos persistente (Redis/Memcached),
+            // es obligatorio limpiar la caché porque los options directos no aplican.
+            if (function_exists('wp_cache_flush')) {
+                wp_cache_flush();
+            }
+
+            // Limpiar caché de páginas si existen plugins de optimización (crítico para HTML estático)
+            if (function_exists('rocket_clean_domain')) {
+                rocket_clean_domain(); // WP Rocket
+            }
+            if (has_action('litespeed_purge_all')) {
+                do_action('litespeed_purge_all'); // LiteSpeed Cache
+            }
+            if (class_exists('\Elementor\Plugin')) {
+                \Elementor\Plugin::$instance->files_manager->clear_cache(); // Elementor
+            }
+
             return new WP_REST_Response(array('ok' => true, 'message' => 'Cache limpiado (todas las sedes)'), 200);
         },
         'permission_callback' => function($request) {
@@ -468,12 +470,15 @@ add_action('rest_api_init', function() {
             // Limpiar cache primero para datos frescos
             global $wpdb;
             $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
-                    '_transient_merkahorro_%',
-                    '_transient_timeout_merkahorro_%'
-                )
+                "DELETE FROM {$wpdb->options}
+                 WHERE option_name LIKE '\_transient\_merkahorro\_%'
+                    OR option_name LIKE '\_transient\_timeout\_merkahorro\_%'
+                    OR option_name LIKE '\_transient\_mks\_%'
+                    OR option_name LIKE '\_transient\_timeout\_mks\_%'"
             );
+            if (function_exists('wp_cache_flush')) {
+                wp_cache_flush();
+            }
 
             $current_sede = merkahorro_get_current_sede();
             $host = isset($_SERVER['HTTP_HOST']) ? strtolower(sanitize_text_field($_SERVER['HTTP_HOST'])) : '(desconocido)';
@@ -813,11 +818,10 @@ add_action('rest_api_init', function() {
                             $date_end = $cond['to'] ?? ($cond_options['to'] ?? null);
                         }
                         // Condición de subtotal del carrito (autoliquidables)
-                        if ($cond_type === 'subtotal') {
+                        if ($cond_type === 'subtotal' || $cond_type === 'cart_subtotal') {
                             $schedule_type = 'cart_condition';
                             $cart_condition_type = 'subtotal';
-                            $operator = $cond_options['operator'] ?? ($cond['operator'] ?? '>=')
-;
+                            $operator = $cond_options['operator'] ?? ($cond['operator'] ?? 'greater_than_or_equal');
                             $cart_condition_value = floatval($cond_options['value'] ?? ($cond['value'] ?? 0));
                         }
                     }
@@ -908,7 +912,7 @@ add_action('rest_api_init', function() {
             $separata_product_ids = array();
             foreach ($rules as $_r) {
                 $prio = intval($_r['priority'] ?? $_r['display_order'] ?? 50);
-                if ($prio < 5 && !empty($_r['applies_to_ids'])) {
+                if ($prio <= 5 && !empty($_r['applies_to_ids'])) {
                     foreach ((array)$_r['applies_to_ids'] as $_id) {
                         $separata_product_ids[] = strval($_id);
                     }
@@ -989,11 +993,16 @@ add_action('rest_api_init', function() {
                     // No necesitamos id de producto — solo forzar recálculo global con cache_version
                 }
             }
-            // Incrementar versión de caché de variaciones para forzar recálculo
-            $current_version = (int) get_option('wc_var_prices_version', 0);
-            update_option('wc_var_prices_version', $current_version + 1);
+            // Limpiar caché de los shortcodes [merkahorro_tiles] de la separata
+            $wpdb->query(
+                "DELETE FROM {$wpdb->options}
+                 WHERE option_name LIKE '\_transient\_merkahorro\_tiles\_%'
+                    OR option_name LIKE '\_transient\_mks\_%'"
+            );
 
             if (function_exists('wp_cache_flush')) wp_cache_flush();
+            if (function_exists('rocket_clean_domain')) rocket_clean_domain();
+            if (has_action('litespeed_purge_all')) do_action('litespeed_purge_all');
 
             return new WP_REST_Response(array(
                 'ok' => true,
@@ -1052,26 +1061,6 @@ add_action('rest_api_init', function() {
 });
 
 /**
- * Convierte IDs foráneos en IDs locales extrayendo el SKU de los nombres.
- */
-function merkahorro_map_ids_by_sku($foreign_ids, $foreign_names) {
-    if (!function_exists('wc_get_product_id_by_sku')) {
-        return $foreign_ids;
-    }
-    $local_ids = array();
-    foreach ((array)$foreign_names as $name_with_sku) {
-        if (preg_match('/\[(.*?)\]/', $name_with_sku, $matches)) {
-            $sku = trim($matches[1]);
-            $local_id = wc_get_product_id_by_sku($sku);
-            if ($local_id) {
-                $local_ids[] = strval($local_id);
-            }
-        }
-    }
-    return !empty($local_ids) ? $local_ids : $foreign_ids;
-}
-
-/**
  * Construir un registro compatible con wp_wdr_rules del plugin FlyCart
  * a partir de una regla de nuestro Gestor
  */
@@ -1081,12 +1070,6 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
     $discount_value = floatval($rule['discount_value'] ?? 0);
     $applies_to = $rule['applies_to'] ?? 'all';
     $applies_to_ids = $rule['applies_to_ids'] ?? array();
-
-    // Map SKUs to specific IDs to avoid WP mismatches
-    if ($applies_to === 'products') {
-        $applies_to_ids = merkahorro_map_ids_by_sku($applies_to_ids, $rule['applies_to_names'] ?? array());
-    }
-
     $schedule_type = $rule['schedule_type'] ?? 'always';
     $schedule_days = $rule['schedule_days'] ?? array();
     $date_start = $rule['date_start'] ?? null;
@@ -1167,28 +1150,21 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
             ),
         );
     } elseif ($schedule_type === 'date_range' && $date_start && $date_end) {
-        $conditions = array(
-            2 => array(
-                'type' => 'order_date_and_time',
-                'options' => array(
-                    'operator' => 'custom_date_range',
-                    'from' => $date_start,
-                    'to' => $date_end,
-                ),
-            ),
-        );
+        // En lugar de usar la condicion 'order_date_and_time' con strings, 
+        // usaremos exclusivamente las columnas date_from y date_to de la tabla
+        // que son más confiables y respetan la zona horaria gracias al fix más abajo.
+        $conditions = array();
     } elseif ($schedule_type === 'cart_condition') {
         $cart_cond_type  = $rule['cart_condition_type'] ?? 'subtotal';
         $cart_cond_value = floatval($rule['cart_condition_value'] ?? 0);
         if ($cart_cond_type === 'subtotal' && $cart_cond_value > 0) {
-            // FlyCart condition type "subtotal" con operator "greater_than_or_equal"
             $conditions = array(
                 2 => array(
-                    'type' => 'subtotal',
+                    'type' => 'cart_subtotal',
                     'options' => array(
                         'operator' => 'greater_than_or_equal',
                         'value'    => strval($cart_cond_value),
-                        'cart_context' => 'cart_total',
+                        'calculate_from' => 'from_cart_excluding_filter',
                     ),
                 ),
             );
@@ -1229,15 +1205,14 @@ function merkahorro_build_wdr_rule($rule, $separata_exclude_ids = array()) {
         } catch (Exception $e) {
             $dtz = new DateTimeZone('America/Bogota');
         }
-        
+
         if ($date_start) {
-            $dt_from = new DateTime($date_start . ' 00:00:00', $dtz);
-            $wdr_date_from = $dt_from->getTimestamp();
+            $dt = new DateTime($date_start . ' 00:00:00', $dtz);
+            $wdr_date_from = $dt->getTimestamp();
         }
-        
         if ($date_end) {
-            $dt_to = new DateTime($date_end . ' 23:59:59', $dtz);
-            $wdr_date_to = $dt_to->getTimestamp();
+            $dt = new DateTime($date_end . ' 23:59:59', $dtz);
+            $wdr_date_to = $dt->getTimestamp();
         }
     }
 
@@ -1308,11 +1283,11 @@ function merkahorro_separatas_shortcode($atts) {
     $sep_max_pages = 1;
     $sep_paged     = max(1, intval($_GET['sep_page'] ?? 1));
     $per_page_sep  = 12;
-    if (merkahorro_is_dev_sede()) {
-        $sep_ids_data = merkahorro_get_separata_rule_ids();
-        $sep_post_ids = $sep_ids_data['post_ids'];
-        $sep_cat_ids  = $sep_ids_data['cat_ids'];
-        if (!empty($sep_post_ids) || !empty($sep_cat_ids)) {
+    // Removido: if (merkahorro_is_dev_sede())
+    $sep_ids_data = merkahorro_get_separata_rule_ids();
+    $sep_post_ids = $sep_ids_data['post_ids'];
+    $sep_cat_ids  = $sep_ids_data['cat_ids'];
+    if (!empty($sep_post_ids) || !empty($sep_cat_ids)) {
             $sep_args = array(
                 'post_type'      => 'product',
                 'post_status'    => 'publish',
@@ -1330,15 +1305,14 @@ function merkahorro_separatas_shortcode($atts) {
                     'terms'    => $sep_cat_ids,
                 ));
             }
-            $sep_query     = new WP_Query($sep_args);
-            $sep_total     = $sep_query->found_posts;
-            $sep_max_pages = $sep_query->max_num_pages;
-            while ($sep_query->have_posts()) {
-                $sep_query->the_post();
-                $sep_products[] = wc_get_product(get_the_ID());
-            }
-            wp_reset_postdata();
+        $sep_query     = new WP_Query($sep_args);
+        $sep_total     = $sep_query->found_posts;
+        $sep_max_pages = $sep_query->max_num_pages;
+        while ($sep_query->have_posts()) {
+            $sep_query->the_post();
+            $sep_products[] = wc_get_product(get_the_ID());
         }
+        wp_reset_postdata();
     }
 
     ob_start();
@@ -1709,7 +1683,6 @@ function merkahorro_get_separata_ids_to_exclude() {
 
 // Caso A: /ofertas/ usa la query PRINCIPAL de WordPress (página sin shortcode, o con el_content directo)
 add_action('pre_get_posts', function($query) {
-    if (!merkahorro_is_dev_sede()) return;
     if (!$query->is_main_query() || is_admin()) return;
     if (!$query->is_page('ofertas')) return;
 
@@ -1723,8 +1696,6 @@ add_action('pre_get_posts', function($query) {
 // Caso B: /ofertas/ usa un SHORTCODE de WooCommerce ([sale_products], [products on_sale="true"], etc.)
 // woocommerce_shortcode_products_query intercepta los args de CUALQUIER shortcode de productos.
 add_filter('woocommerce_shortcode_products_query', function($query_args, $atts, $type) {
-    if (!merkahorro_is_dev_sede()) return $query_args;
-
     // Verificar que estamos en la página /ofertas/ usando la global $post
     global $post;
     if (!$post || $post->post_name !== 'ofertas') return $query_args;
@@ -1764,8 +1735,8 @@ add_action('template_redirect', function() {
 
     $promo_id = absint($promo_id);
 
-    // Obtener la regla de descuento desde la API del Gestor
-    $url      = MERKAHORRO_API_URL . '/content/discounts/' . $promo_id;
+    // Obtener la regla de descuento desde la API del Gestor con timestamp para evitar caché retenido
+    $url      = MERKAHORRO_API_URL . '/content/discounts/' . $promo_id . '?t=' . time();
     $response = wp_remote_get($url, array('timeout' => 10, 'sslverify' => false));
 
     $rule = null;
@@ -1853,12 +1824,6 @@ add_action('template_redirect', function() {
     $rule_title      = $rule['title'] ?? 'Productos en Promoción';
     $applies_to      = $rule['applies_to'] ?? 'all';
     $applies_to_ids  = $rule['applies_to_ids'] ?? array();
-    
-    // Mapear SKUs en caso de IDs cruzados
-    if ($applies_to === 'products') {
-        $applies_to_ids = merkahorro_map_ids_by_sku($applies_to_ids, $rule['applies_to_names'] ?? array());
-    }
-
     $discount_type   = $rule['discount_type'] ?? 'percentage';
     $discount_value  = $rule['discount_value'] ?? 0;
 
@@ -2199,24 +2164,6 @@ add_action('template_redirect', function() {
                 </div>
                 <?php endif; ?>
 
-                <!-- Ordenar -->
-                <div class="mks-filter-widget">
-                    <p class="mks-filter-widget-title">↕ Ordenar por</p>
-                    <form method="get" action="<?php echo esc_url(strtok($_SERVER['REQUEST_URI'], '?')); ?>">
-                        <?php foreach ($_GET as $k => $v):
-                            if ($k === 'orderby') continue;
-                            echo '<input type="hidden" name="' . esc_attr($k) . '" value="' . esc_attr($v) . '">';
-                        endforeach; ?>
-                        <select class="mks-sort-select" name="orderby" onchange="this.form.submit()">
-                            <option value="menu_order"<?php selected($orderby_raw,'menu_order'); ?>>Orden predeterminado</option>
-                            <option value="popularity"<?php selected($orderby_raw,'popularity'); ?>>Popularidad</option>
-                            <option value="date"<?php selected($orderby_raw,'date'); ?>>Más recientes</option>
-                            <option value="price"<?php selected($orderby_raw,'price'); ?>>Precio: menor a mayor</option>
-                            <option value="price-desc"<?php selected($orderby_raw,'price-desc'); ?>>Precio: mayor a menor</option>
-                        </select>
-                    </form>
-                </div>
-
             </aside>
 
             <!-- ─── CONTENIDO PRINCIPAL ─── -->
@@ -2365,3 +2312,174 @@ ul.products li.product .mks-fixed-sale,
 }
 </style>
 <?php }, 20);
+// -----------------------------------------------------------------------
+// Auto-inject antes del loop en la categoría descuentos-especiales
+// -----------------------------------------------------------------------
+add_action('woocommerce_before_shop_loop', function () {
+    if (! is_product_category('descuentos-especiales')) return;
+    echo do_shortcode('[merkahorro_discount_tiles]');
+}, 5);
+
+// -----------------------------------------------------------------------
+// Shortcode [merkahorro_discount_tiles]
+// -----------------------------------------------------------------------
+add_shortcode('merkahorro_discount_tiles', 'merkahorro_discount_tiles_shortcode');
+
+function merkahorro_discount_tiles_shortcode($atts) {
+    $atts = shortcode_atts(['sede' => null], $atts, 'merkahorro_discount_tiles');
+
+    $sede = $atts['sede'] ?: merkahorro_get_current_sede();
+    $cache_key = 'mks_discount_tiles_' . sanitize_key($sede ?: 'all');
+
+    $tiles = get_transient($cache_key);
+
+    if (false === $tiles) {
+        $api_url = MERKAHORRO_API_URL . '/content/banners?section=discount_tiles';
+        if ($sede) {
+            $api_url .= '&sede=' . urlencode($sede);
+        }
+        $api_url .= '&t=' . time(); // Bypass Edge/Vercel Cache
+
+        $response = wp_remote_get($api_url, [
+            'timeout' => 10,
+            'headers' => ['x-api-key' => MERKAHORRO_API_KEY],
+            'sslverify' => false
+        ]);
+
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            return '<!-- merkahorro_discount_tiles: error al cargar -->';
+        }
+
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        $tiles = $body['data'] ?? [];
+        set_transient($cache_key, $tiles, MERKAHORRO_CACHE_TTL);
+    }
+
+    $tiles = array_values(array_filter($tiles, fn($t) => !empty($t['active'])));
+    if (empty($tiles)) return '';
+
+    usort($tiles, fn($a, $b) => ($a['display_order'] ?? 0) - ($b['display_order'] ?? 0));
+
+    $uid = 'mks-dtiles-' . substr(md5($sede . time()), 0, 6);
+
+    ob_start();
+    ?>
+    <style>
+        .mks-tiles-wrap { position: relative; margin: 16px 0 0; }
+        .mks-tiles { display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px 0 12px; }
+        .mks-tiles::-webkit-scrollbar { display: none; }
+        .mks-tile { flex: 0 0 calc(20% - 12px); scroll-snap-align: start; border-radius: 14px; overflow: hidden; transition: transform 0.25s ease, box-shadow 0.25s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .mks-tile:hover { transform: translateY(-4px); box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
+        .mks-tile img { width: 100%; height: auto; display: block; opacity: 0; transition: opacity 0.4s ease; }
+        .mks-tile img.mks-loaded { opacity: 1; }
+        .mks-tile a { display: block; text-decoration: none; }
+        .mks-tiles-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; background: rgba(0,0,0,0.4); color: white; border: none; font-size: 1.3rem; padding: 10px 14px; cursor: pointer; border-radius: 6px; transition: background 0.2s; }
+        .mks-tiles-nav:hover { background: rgba(0,0,0,0.7); }
+        .mks-tiles-prev { left: -6px; }
+        .mks-tiles-next { right: -6px; }
+        @media (min-width: 1024px) { .mks-tiles-wrap.fits-all .mks-tiles-nav { display: none; } }
+        @media (max-width: 1023px) { .mks-tile { flex: 0 0 calc(33.333% - 10px); } }
+        @media (max-width: 600px) { .mks-tile { flex: 0 0 calc(50% - 8px); } .mks-tiles { gap: 10px; } .mks-tiles-nav { padding: 6px 10px; font-size: 1rem; } }
+
+        /* --- Lightbox modal para tiles --- */
+        .mks-tile-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 99999; align-items: center; justify-content: center; padding: 20px; }
+        .mks-tile-modal-overlay.active { display: flex; }
+        .mks-tile-modal-inner { position: relative; max-width: 90vw; max-height: 90vh; }
+        .mks-tile-modal-inner img { max-width: 100%; max-height: 90vh; border-radius: 10px; display: block; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+        .mks-tile-modal-close { position: absolute; top: -14px; right: -14px; background: #88dc00; color: #160857; border: none; border-radius: 50%; width: 34px; height: 34px; font-size: 1.2rem; font-weight: 900; cursor: pointer; line-height: 34px; text-align: center; padding: 0; }
+    </style>
+    <div class="mks-tiles-wrap" id="<?php echo esc_attr($uid); ?>">
+      <div class="mks-tiles">
+        <?php foreach ($tiles as $tile) :
+          $href    = esc_url($tile['link_url'] ?? '#');
+          $img     = esc_url($tile['image_url'] ?? '');
+          $alt     = esc_attr($tile['alt_text'] ?? $tile['title'] ?? '');
+          $label   = esc_html($tile['label'] ?? $tile['title'] ?? '');
+        ?>
+        <div class="mks-tile">
+          <a href="<?php echo $href; ?>" class="mks-tile-link" data-img="<?php echo $img; ?>" data-url="<?php echo $href; ?>">
+            <?php if ($img) : ?>
+              <img src="<?php echo $img; ?>" alt="<?php echo $alt; ?>" loading="lazy" class="mks-loaded" />
+            <?php endif; ?>
+            <?php if ($label) : ?>
+              <span class="mks-tile-label" style="display:block;text-align:center;font-size:0.85rem;font-weight:700;color:#160857;padding:5px 0;"><?php echo $label; ?></span>
+            <?php endif; ?>
+          </a>
+        </div>
+        <?php endforeach; ?>
+      </div>
+      <button class="mks-tiles-nav mks-tiles-prev" aria-label="Anterior">&#8249;</button>
+      <button class="mks-tiles-nav mks-tiles-next" aria-label="Siguiente">&#8250;</button>
+    </div>
+
+    <!-- Lightbox overlay para tiles -->
+    <div class="mks-tile-modal-overlay" id="mks-tile-modal-<?php echo esc_attr($uid); ?>">
+        <div class="mks-tile-modal-inner">
+            <button class="mks-tile-modal-close" aria-label="Cerrar">✖</button>
+            <a href="#" id="mks-tile-modal-link-<?php echo esc_attr($uid); ?>">
+                <img src="" alt="Tile" id="mks-tile-modal-img-<?php echo esc_attr($uid); ?>">
+            </a>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var wrap  = document.getElementById('<?php echo esc_js($uid); ?>');
+        if (!wrap) return;
+        var track = wrap.querySelector('.mks-tiles');
+        var prev  = wrap.querySelector('.mks-tiles-prev');
+        var next  = wrap.querySelector('.mks-tiles-next');
+        var tile  = track.querySelector('.mks-tile');
+        if (!tile) return;
+
+        function getScrollAmount() { return tile.offsetWidth + 14; }
+        function checkFits() {
+            if (track.scrollWidth <= track.clientWidth + 2) wrap.classList.add('fits-all');
+            else wrap.classList.remove('fits-all');
+        }
+
+        if (prev) prev.addEventListener('click', function() { track.scrollBy({ left: -getScrollAmount(), behavior: 'smooth' }); });
+        if (next) next.addEventListener('click', function() { track.scrollBy({ left:  getScrollAmount(), behavior: 'smooth' }); });
+
+        checkFits();
+        window.addEventListener('resize', checkFits);
+
+        // --- Logica Modal Tiles ---
+        var overlay = document.getElementById('mks-tile-modal-' + '<?php echo esc_js($uid); ?>');
+        var modalImg = document.getElementById('mks-tile-modal-img-' + '<?php echo esc_js($uid); ?>');
+
+        if (overlay && modalImg) {
+            track.addEventListener('click', function(e) {
+                var link = e.target.closest('a.mks-tile-link');
+                if (!link) return;
+                
+                var url = link.getAttribute('data-url');
+                
+                if (!url || url === '#' || url.trim() === '') {
+                    e.preventDefault();
+                    modalImg.src = link.getAttribute('data-img') || '';
+                    overlay.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                }
+            });
+
+            overlay.addEventListener('click', function(e){
+                if (e.target === overlay || e.target.classList.contains('mks-tile-modal-close') || e.target.closest('.mks-tile-modal-close')) {
+                    e.preventDefault();
+                    overlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            });
+
+            document.addEventListener('keydown', function(e){
+                if (e.key === 'Escape' && overlay.classList.contains('active')) {
+                    overlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            });
+        }
+    })();
+    </script>
+    <?php
+    return ob_get_clean();
+}

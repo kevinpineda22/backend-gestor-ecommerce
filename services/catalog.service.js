@@ -1128,11 +1128,14 @@ export async function adoptWooProducts() {
 
   // Pre-fetch: items que YA tienen woo_product_id asignado.
   // Estos NO deben tener su active_sedes sobreescrita — el usuario los configuró manualmente.
-  const existingLinkedRows = await fetchAllRows("ecommerce_products", "item, woo_product_id");
-  const alreadyLinked = new Set(
-    existingLinkedRows.filter(r => r.woo_product_id != null).map(r => String(r.item).trim().toUpperCase())
-  );
-  console.log(`🔗 Productos ya vinculados (active_sedes se preservará): ${alreadyLinked.size}`);
+  const existingLinkedRows = await fetchAllRows("ecommerce_products", "item, woo_product_id, active_sedes, image_url");
+  const linkedMap = new Map();
+  existingLinkedRows.forEach(r => {
+    if (r.woo_product_id != null) {
+      linkedMap.set(String(r.item).trim().toUpperCase(), r);
+    }
+  });
+  console.log(`🔗 Productos ya vinculados (active_sedes se preservará): ${linkedMap.size}`);
 
   let page = 1;
   const perPage = 100;
@@ -1184,28 +1187,16 @@ export async function adoptWooProducts() {
       syncedWooIds.add(p.id);
 
       const itemKeyUpper = String(itemKey).trim().toUpperCase();
-      const isAlreadyLinked = alreadyLinked.has(itemKeyUpper);
+      const existingData = linkedMap.get(itemKeyUpper);
 
-      if (isAlreadyLinked) {
-        // Producto ya vinculado: NO tocar active_sedes (el usuario lo configuró manualmente).
-        // Solo refrescar metadatos: woo_product_id, status, nombre, imagen, cats, tags.
-        // IMPORTANTE: image_url solo se actualiza si Woo devuelve una imagen real —
-        // nunca se sobreescribe con null para proteger imágenes configuradas en el gestor.
-        const freshImageUrl = p.images?.[0]?.src || undefined; // undefined = no incluir en payload
-        const linkedPayload = {
-          item: String(itemKey),
-          woo_product_id: p.id,
-          woo_status: p.status,
-          ecommerce_active: p.status === "publish",
-          woo_name: p.name,
-          woo_category_names: catNames,
-          woo_tag_names: tagNames,
-          last_sync: new Date().toISOString()
-        };
-        if (freshImageUrl) linkedPayload.image_url = freshImageUrl;
-        payload.push(linkedPayload);
+      if (existingData) {
+        // 🔒 PROTECCIÓN ESTRICTA DEL GESTOR LOCAL:
+        // Si el producto ya existe y está vinculado en Supabase, lo OMITIMOS por completo
+        // del payload de sincronización. WooCommerce jamás pisará los datos locales 
+        // (nombres, imágenes, activaciones de sedes) de los productos ya gestionados.
+        continue;
       } else {
-        // Producto NUEVO (nunca vinculado): sí se inicializa active_sedes.
+        // Producto NUEVO (nunca vinculado) o recién adoptado.
         payload.push({
           item: String(itemKey),
           woo_product_id: p.id,
