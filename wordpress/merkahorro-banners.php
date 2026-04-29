@@ -1282,6 +1282,7 @@ function merkahorro_separatas_shortcode($atts) {
     $sep_total     = 0;
     $sep_max_pages = 1;
     $sep_paged     = max(1, intval($_GET['sep_page'] ?? 1));
+    $sep_filter_cat = isset($_GET['sep_cat']) ? absint($_GET['sep_cat']) : 0;
     $per_page_sep  = 12;
     // Removido: if (merkahorro_is_dev_sede())
     $sep_ids_data = merkahorro_get_separata_rule_ids();
@@ -1305,6 +1306,21 @@ function merkahorro_separatas_shortcode($atts) {
                     'terms'    => $sep_cat_ids,
                 ));
             }
+            
+            // Aplicar el filtro de categoría si está seleccionado por el usuario
+            if ($sep_filter_cat > 0) {
+                if (!isset($sep_args['tax_query'])) {
+                    $sep_args['tax_query'] = array('relation' => 'AND');
+                } else {
+                    $sep_args['tax_query']['relation'] = 'AND';
+                }
+                $sep_args['tax_query'][] = array(
+                    'taxonomy' => 'product_cat',
+                    'field'    => 'term_id',
+                    'terms'    => $sep_filter_cat,
+                );
+            }
+            
         $sep_query     = new WP_Query($sep_args);
         $sep_total     = $sep_query->found_posts;
         $sep_max_pages = $sep_query->max_num_pages;
@@ -1313,6 +1329,20 @@ function merkahorro_separatas_shortcode($atts) {
             $sep_products[] = wc_get_product(get_the_ID());
         }
         wp_reset_postdata();
+        
+        // Obtener categorías disponibles para el filtro
+        $available_cats = array();
+        if (!empty($sep_post_ids)) {
+            $cat_terms = wp_get_object_terms($sep_post_ids, 'product_cat');
+            if (!is_wp_error($cat_terms)) {
+                $available_cats = $cat_terms;
+            }
+        } elseif (!empty($sep_cat_ids)) {
+            foreach ($sep_cat_ids as $cid) {
+                $term = get_term($cid, 'product_cat');
+                if ($term && !is_wp_error($term)) $available_cats[] = $term;
+            }
+        }
     }
 
     ob_start();
@@ -1451,6 +1481,35 @@ function merkahorro_separatas_shortcode($atts) {
             #<?php echo esc_attr($grid_id); ?> .mks-sep-card { flex: 0 0 83vw; }
             .mks-sep-hero h2 { font-size: 1.5rem; }
         }
+
+        /* ─── Filtro de categorías ─── */
+        .mks-sep-filters {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            margin-bottom: 24px;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        .mks-sep-filters::-webkit-scrollbar { display: none; }
+        .mks-sep-filter-btn {
+            background: #f1f1f1;
+            color: #444;
+            border: 1px solid #e1e1e1;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .mks-sep-filter-btn.active, .mks-sep-filter-btn:hover {
+            background: #160857;
+            color: #fff;
+            border-color: #160857;
+        }
     </style>
 
     <!-- ─── Lightbox overlay ─── -->
@@ -1487,51 +1546,9 @@ function merkahorro_separatas_shortcode($atts) {
         <p>Separatas y promociones exclusivas de nuestra tienda</p>
     </div>
 
-    <?php if (!empty($sep_products)): ?>
-    <!-- ─── PRODUCTOS DE SEPARATA ─── -->
-    <span id="ofertas-especiales-productos"></span>
-    <p class="mks-sep-section-label">🛒 Productos en oferta especial</p>
-    <div id="<?php echo esc_attr($prod_grid); ?>" class="woocommerce">
-        <?php
-        wc_setup_loop(array(
-            'columns'      => apply_filters('loop_shop_columns', 4),
-            'total'        => $sep_total,
-            'total_pages'  => $sep_max_pages,
-            'current_page' => $sep_paged,
-        ));
-        woocommerce_product_loop_start();
-        foreach ($sep_products as $product):
-            if (!$product || !$product->is_visible()) continue;
-            $GLOBALS['post'] = get_post($product->get_id());
-            setup_postdata($GLOBALS['post']);
-            wc_get_template_part('content', 'product');
-        endforeach;
-        wp_reset_postdata();
-        woocommerce_product_loop_end();
-        wc_reset_loop();
-        ?>
-    </div>
-    <?php if ($sep_max_pages > 1): ?>
-    <div class="woocommerce">
-    <nav class="woocommerce-pagination" style="margin-top:24px;">
-        <?php echo paginate_links(array(
-            'base'      => add_query_arg('sep_page', '%#%'),
-            'format'    => '',
-            'current'   => $sep_paged,
-            'total'     => $sep_max_pages,
-            'prev_text' => '&laquo;',
-            'next_text' => '&raquo;',
-            'type'      => 'list',
-            'add_args'  => false,
-        )); ?>
-    </nav>
-    </div>
-    <?php endif; ?>
-    <?php endif; ?>
-
     <?php if (!empty($banners)): ?>
-    <!-- ─── FLYERS / SEPARATAS: Carousel ─── -->
-    <p class="mks-sep-section-label" style="margin-top:36px;">🗞️ Separatas de la semana</p>
+    <!-- ─── FLYERS / SEPARATAS: Carousel (Cambiado de posición: Primero) ─── -->
+    <p class="mks-sep-section-label">🗞️ Separatas de la semana</p>
     <div class="mks-sep-carousel-wrap">
         <button class="mks-sep-nav-btn mks-sep-nav-prev" id="mks-prev-<?php echo esc_attr($grid_id); ?>" aria-label="Anterior">&#8249;</button>
         <div id="<?php echo esc_attr($grid_id); ?>">
@@ -1592,7 +1609,69 @@ function merkahorro_separatas_shortcode($atts) {
     </script>
     <?php endif; ?>
 
-    <?php if (empty($banners) && empty($sep_products)): ?>
+
+    <?php if (!empty($sep_products) || $sep_filter_cat > 0): ?>
+    <!-- ─── PRODUCTOS DE SEPARATA (Cambiado de posición: Debajo de los flyers) ─── -->
+    <span id="ofertas-especiales-productos"></span>
+    <p class="mks-sep-section-label" style="margin-top:36px;">🛒 Productos en oferta especial</p>
+    
+    <!-- Filtro de Categorías -->
+    <?php if (!empty($available_cats) && count($available_cats) > 1): ?>
+        <div class="mks-sep-filters">
+            <a href="?sep_cat=0#ofertas-especiales-productos" class="mks-sep-filter-btn <?php echo ($sep_filter_cat === 0) ? 'active' : ''; ?>">Todos</a>
+            <?php foreach ($available_cats as $cat): ?>
+                <a href="?sep_cat=<?php echo esc_attr($cat->term_id); ?>#ofertas-especiales-productos" 
+                   class="mks-sep-filter-btn <?php echo ($sep_filter_cat === $cat->term_id) ? 'active' : ''; ?>">
+                    <?php echo esc_html($cat->name); ?>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+
+    <div id="<?php echo esc_attr($prod_grid); ?>" class="woocommerce">
+        <?php
+        if (empty($sep_products)) {
+            echo '<p style="text-align:center;padding:20px;color:#999;">No se encontraron productos en esta categoría.</p>';
+        } else {
+            wc_setup_loop(array(
+                'columns'      => apply_filters('loop_shop_columns', 4),
+                'total'        => $sep_total,
+                'total_pages'  => $sep_max_pages,
+                'current_page' => $sep_paged,
+            ));
+            woocommerce_product_loop_start();
+            foreach ($sep_products as $product):
+                if (!$product || !$product->is_visible()) continue;
+                $GLOBALS['post'] = get_post($product->get_id());
+                setup_postdata($GLOBALS['post']);
+                wc_get_template_part('content', 'product');
+            endforeach;
+            wp_reset_postdata();
+            woocommerce_product_loop_end();
+            wc_reset_loop();
+        }
+        ?>
+    </div>
+    <?php if ($sep_max_pages > 1): ?>
+    <div class="woocommerce">
+    <nav class="woocommerce-pagination" style="margin-top:24px;">
+        <?php echo paginate_links(array(
+            'base'      => add_query_arg('sep_page', '%#%'),
+            'format'    => '',
+            'current'   => $sep_paged,
+            'total'     => $sep_max_pages,
+            'prev_text' => '&laquo;',
+            'next_text' => '&raquo;',
+            'type'      => 'list',
+            // Agregamos preservar el parametro cat en paginacion
+            'add_args'  => $sep_filter_cat > 0 ? array('sep_cat' => $sep_filter_cat) : false,
+        )); ?>
+    </nav>
+    </div>
+    <?php endif; ?>
+    <?php endif; ?>
+
+    <?php if (empty($banners) && empty($sep_products) && $sep_filter_cat === 0): ?>
         <p style="text-align:center;padding:40px;color:#999;">
             No hay ofertas especiales disponibles en este momento.
         </p>

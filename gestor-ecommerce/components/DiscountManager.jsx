@@ -312,15 +312,33 @@ export default function DiscountManager({ sedes = [], sedeActual = null, esAdmin
     const valDsctoIdx = headers.findIndex(h => 
       h === 'valor_dscto' || h === 'valor dscto' || h === 'valor_descuento' || 
       h === 'valor descuento' || h === 'descuento' || h === 'discount' || h === 'dscto' ||
-      h === 'valor dsc' || h === 'valor_dsc'
+      h === 'valor dsc' || h === 'valor_dsc' || h.includes('valor dscto')
     );
+    const maxCantIdx = headers.findIndex(h => 
+      h.includes('nt. máxima') || h.includes('nt. maxima') || 
+      h.includes('cant. máxima') || h.includes('cant. maxima') || h.includes('maxima')
+    );
+    
     const colIdx = skuColIdx >= 0 ? skuColIdx : 0;
 
     const rows = [];
     for (const cols of dataRows) {
-      const skuRaw = String(cols[colIdx] || '').trim();
+      let skuRaw = String(cols[colIdx] || '').trim();
       if (!skuRaw) continue;
+      
       const valorDscto = valDsctoIdx >= 0 ? parseMoneyValue(cols[valDsctoIdx]) : 0;
+
+      // Auto-conversión de sufijo P (ej: de 1199 a 1199P25) basado en Cant. máxima
+      if (maxCantIdx >= 0) {
+        const cantMaxStr = String(cols[maxCantIdx] || '').trim();
+        // Siesa puede traer "25,00" o "25.00"
+        const cantMaxFloat = parseFloat(cantMaxStr.replace(',', '.'));
+        if (!isNaN(cantMaxFloat) && cantMaxFloat > 0) {
+          const cantMaxInt = Math.round(cantMaxFloat);
+          skuRaw = `${skuRaw}P${cantMaxInt}`;
+        }
+      }
+
       rows.push({ sku: skuRaw, valor_dscto: valorDscto });
     }
     return rows;
