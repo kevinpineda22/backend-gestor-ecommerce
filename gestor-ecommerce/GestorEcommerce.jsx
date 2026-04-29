@@ -5,7 +5,6 @@ import LiveComparison from './components/LiveComparison';
 import CatalogManager from './CatalogManager';
 import BannerManager from './components/BannerManager';
 import DiscountManager from './components/DiscountManager';
-import LogisticsManager from './components/LogisticsManager';
 import AWDRManager from './components/AWDRManager';
 import { fetchSedes } from './services';
 import './GestorEcommerce.css';
@@ -71,8 +70,6 @@ const GestorEcommerce = () => {
         return <BannerManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'discounts':
         return <DiscountManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
-      case 'logistics':
-        return <LogisticsManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'awdr':
         return <AWDRManager sedes={sedes} sedeActual={sedeActual} esAdminGlobal={esAdminGlobal} />;
       case 'settings':
@@ -138,9 +135,6 @@ const GestorEcommerce = () => {
           </button>
 
           <div className="ge-nav-label spacer">OPERACIONES</div>
-          <button className={`ge-nav-button ${activeTab === 'logistics' ? 'active' : ''}`} onClick={() => navigate('logistics')}>
-            <FaTruck /> <span>Logística</span>
-          </button>
           <button className={`ge-nav-button ${activeTab === 'awdr' ? 'active' : ''}`} onClick={() => navigate('awdr')}>
             <FaBell /> <span>Avisos AWDR</span>
           </button>
