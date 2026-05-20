@@ -13,11 +13,12 @@ class Merkahorro_Bridge_Cache_Manager {
      */
     public static function clear_local_transients($type = 'all') {
         global $wpdb;
-        
+
+        // Cubre tanto los transients con prefijo merkahorro_ como los mks_ (separatas, sliders).
         $sql = "DELETE FROM {$wpdb->options} WHERE option_name LIKE '\_transient\_merkahorro\_%' OR option_name LIKE '\_transient\_timeout\_merkahorro\_%' OR option_name LIKE '\_transient\_mks\_%' OR option_name LIKE '\_transient\_timeout\_mks\_%'";
-        
+
         $wpdb->query($sql);
-        Merkahorro_Bridge_Logger::log("Transients locales purgados.", "INFO");
+        Merkahorro_Bridge_Logger::log("Transients locales purgados (merkahorro_*, mks_*).", "INFO");
     }
 
     /**

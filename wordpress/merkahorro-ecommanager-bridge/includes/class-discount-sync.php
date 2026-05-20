@@ -33,6 +33,16 @@ class Merkahorro_Bridge_Discount_Sync {
         $table = $wpdb->prefix . 'wdr_rules';
         $prefix = '[MK-Gestor] ';
         $title = $request->get_param('title');
+        $delete_all = $request->get_param('delete_all') === 'true' || $request->get_param('delete_all') === true;
+
+        // Borrado masivo requiere flag explícito — protege contra errores de integración.
+        if (empty($title) && !$delete_all) {
+            Merkahorro_Bridge_Logger::log_api_call('/sync-discount-rules (DELETE)', array('status' => 'rejected', 'reason' => 'missing title or delete_all=true'));
+            return new WP_REST_Response(array(
+                'ok' => false,
+                'message' => 'Para borrar todas las reglas envía delete_all=true explícitamente.'
+            ), 400);
+        }
 
         if (empty($title)) {
             $deleted = $wpdb->query($wpdb->prepare("DELETE FROM {$table} WHERE title LIKE %s", $prefix . '%'));
@@ -43,12 +53,20 @@ class Merkahorro_Bridge_Discount_Sync {
         delete_option('wdr_transient_version');
         $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", '_transient_wdr_%', '_transient_timeout_wdr_%'));
 
-        Merkahorro_Bridge_Logger::log_api_call('/sync-discount-rules (DELETE)', array('title' => $title));
+        // Invalidar caché propia de los listados
+        delete_transient('merkahorro_woo_discount_rules');
+        delete_transient('mks_separata_ids_v1');
+
+        Merkahorro_Bridge_Logger::log_api_call('/sync-discount-rules (DELETE)', array(
+            'title' => $title,
+            'delete_all' => $delete_all,
+            'deleted' => $deleted,
+        ));
 
         return new WP_REST_Response(array('ok' => true, 'deleted' => $deleted !== false, 'message' => $deleted ? 'Regla(s) eliminada(s)' : 'No se encontró'), 200);
     }
 
-    public static function get_rules() {
+    public static function get_rules($request = null) {
         global $wpdb;
         $table = $wpdb->prefix . 'wdr_rules';
 
@@ -56,8 +74,29 @@ class Merkahorro_Bridge_Discount_Sync {
             return new WP_REST_Response(array('ok' => false, 'message' => 'Tabla wdr_rules no encontrada', 'data' => array()), 200);
         }
 
-        $rules = $wpdb->get_results("SELECT * FROM {$table} ORDER BY priority ASC", ARRAY_A);
-        if (empty($rules)) return new WP_REST_Response(array('ok' => true, 'data' => array()), 200);
+        // Cache de respuesta — invalidada en sync_rules() y delete_rules().
+        // Permitir bypass con ?fresh=true para diagnóstico.
+        $fresh = $request && ($request->get_param('fresh') === 'true' || $request->get_param('fresh') === true);
+        $cache_key = 'merkahorro_woo_discount_rules';
+
+        if (!$fresh) {
+            $cached = get_transient($cache_key);
+            if ($cached !== false) {
+                return new WP_REST_Response($cached, 200);
+            }
+        }
+
+        // Solo leemos las columnas que vamos a procesar.
+        $rules = $wpdb->get_results(
+            "SELECT id, title, enabled, priority, filters, conditions, product_adjustments, advanced_discount_message, date_from, date_to
+             FROM {$table} ORDER BY priority ASC",
+            ARRAY_A
+        );
+        if (empty($rules)) {
+            $empty_payload = array('ok' => true, 'data' => array(), 'total' => 0);
+            set_transient($cache_key, $empty_payload, 5 * MINUTE_IN_SECONDS);
+            return new WP_REST_Response($empty_payload, 200);
+        }
 
         $parsed = array();
         foreach ($rules as $rule) {
@@ -120,7 +159,9 @@ class Merkahorro_Bridge_Discount_Sync {
             );
         }
 
-        return new WP_REST_Response(array('ok' => true, 'data' => $parsed, 'total' => count($parsed)), 200);
+        $payload = array('ok' => true, 'data' => $parsed, 'total' => count($parsed));
+        set_transient($cache_key, $payload, 5 * MINUTE_IN_SECONDS);
+        return new WP_REST_Response($payload, 200);
     }
 
     public static function sync_rules($request) {
@@ -134,8 +175,21 @@ class Merkahorro_Bridge_Discount_Sync {
         }
 
         $rules = $request->get_json_params();
-        if (empty($rules) || !is_array($rules)) {
-            return new WP_REST_Response(array('ok' => false, 'message' => 'No se recibieron reglas'), 200);
+        if (!is_array($rules)) {
+            return new WP_REST_Response(array('ok' => false, 'message' => 'Payload inválido: se esperaba un array de reglas'), 400);
+        }
+
+        // Payload vacío puede ser legítimo (limpiar todo) o un bug del cliente.
+        // Lo permitimos solo con el flag explícito sync_empty=true para evitar borrados accidentales.
+        if (empty($rules)) {
+            $allow_empty = $request->get_param('sync_empty') === 'true' || $request->get_param('sync_empty') === true;
+            if (!$allow_empty) {
+                Merkahorro_Bridge_Logger::log_api_call('/sync-discount-rules', array('status' => 'rejected', 'reason' => 'empty payload without sync_empty=true'));
+                return new WP_REST_Response(array(
+                    'ok' => false,
+                    'message' => 'Payload vacío. Para borrar todas las reglas envía sync_empty=true explícitamente.'
+                ), 400);
+            }
         }
 
         // Generar un hash del payload para ver si cambió respecto a la última vez
@@ -249,6 +303,10 @@ class Merkahorro_Bridge_Discount_Sync {
         // Limpiar caché de WooCommerce de precios variables solo para evitar problemas visuales de precios cacheados
         $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '\_transient\_wc\_var\_prices\_%' OR option_name LIKE '\_transient\_timeout\_wc\_var\_prices\_%'");
         delete_transient('wc_products_onsale');
+
+        // Invalidar nuestras cachés propias (listado de reglas + separatas)
+        delete_transient('merkahorro_woo_discount_rules');
+        delete_transient('mks_separata_ids_v1');
 
         // Log de la operación
         Merkahorro_Bridge_Logger::log_api_call('/sync-discount-rules', array('synced' => $synced, 'updated' => $updated, 'created' => $created));

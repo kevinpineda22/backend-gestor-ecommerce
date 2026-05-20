@@ -17,7 +17,19 @@ class Merkahorro_Bridge_Banners {
         ));
     }
 
-    public static function endpoint_wp_banners() {
+    public static function endpoint_wp_banners($request = null) {
+        // Cache de la respuesta — esta consulta lee RevSlider + WooCommerce categories + media library.
+        // Sin cache, cada llamada del Gestor escanea hasta 80 attachments + N categorías + todos los slides.
+        $fresh = $request && ($request->get_param('fresh') === 'true' || $request->get_param('fresh') === true);
+        $cache_key = 'merkahorro_wp_banners_inventory';
+
+        if (!$fresh) {
+            $cached = get_transient($cache_key);
+            if ($cached !== false) {
+                return new WP_REST_Response($cached, 200);
+            }
+        }
+
         global $wpdb;
         $results = array();
 
@@ -82,7 +94,19 @@ class Merkahorro_Bridge_Banners {
             );
         }
 
-        return new WP_REST_Response(array('ok' => true, 'data' => $results, 'total' => count($results), 'sources' => array('revslider' => (bool)$has_revslider, 'woo_categories' => !is_wp_error($terms), 'media_library' => true)), 200);
+        $payload = array(
+            'ok' => true,
+            'data' => $results,
+            'total' => count($results),
+            'sources' => array(
+                'revslider' => (bool)$has_revslider,
+                'woo_categories' => !is_wp_error($terms),
+                'media_library' => true,
+            ),
+        );
+        // TTL 15 min — inventario de banners no cambia minuto a minuto.
+        set_transient($cache_key, $payload, 15 * MINUTE_IN_SECONDS);
+        return new WP_REST_Response($payload, 200);
     }
 
     public static function get_banners($section = 'home_slider', $sede = null) {

@@ -60,40 +60,70 @@ function merkahorro_bridge_init() {
 }
 add_action('plugins_loaded', 'merkahorro_bridge_init');
 
-// Helper global: detectar sede actual (mismo código base que antes, pero más limpio)
+// Activación: registra la regla de rewrite /promo/descuento/{id}/ y hace flush.
+// Sin esto, la URL devuelve 404 hasta que un admin entre a Permalinks y guarde.
+function merkahorro_bridge_activate() {
+    if (class_exists('Merkahorro_Bridge_Separatas')) {
+        Merkahorro_Bridge_Separatas::register_promo_rewrite_rule();
+    } else {
+        // Fallback si por algún motivo la clase aún no está cargada
+        add_rewrite_rule('^promo/descuento/([0-9]+)/?$', 'index.php?merkahorro_promo_id=$matches[1]', 'top');
+    }
+    flush_rewrite_rules();
+}
+register_activation_hook(__FILE__, 'merkahorro_bridge_activate');
+
+// Desactivación: limpia las reglas de rewrite para no dejar URLs colgadas.
+function merkahorro_bridge_deactivate() {
+    flush_rewrite_rules();
+}
+register_deactivation_hook(__FILE__, 'merkahorro_bridge_deactivate');
+
+// Helper global: detectar sede actual.
+// Acepta valores externos SOLO si están dentro de MERKAHORRO_SEDE_MAP.
+// Esto cierra el agujero por el que un atacante podía forzar una sede arbitraria vía ?sede= o cookies.
 if (!function_exists('merkahorro_get_current_sede')) {
     function merkahorro_get_current_sede() {
         static $sede_cache = null;
+        static $valid_codes = null;
         static $sede_map_cache = null;
 
         if ($sede_cache !== null) {
             return $sede_cache === '' ? null : $sede_cache;
         }
 
-        if (!empty($_GET['sede'])) {
-            $sede_cache = sanitize_text_field($_GET['sede']);
-            return $sede_cache;
-        }
-
         if ($sede_map_cache === null) {
             $sede_map_cache = json_decode(MERKAHORRO_SEDE_MAP, true) ?: array();
+            $valid_codes = array_values($sede_map_cache);
         }
-        
+
+        // 1. Override por querystring — solo si el código es válido
+        if (!empty($_GET['sede'])) {
+            $candidate = sanitize_text_field($_GET['sede']);
+            if (in_array($candidate, $valid_codes, true)) {
+                $sede_cache = $candidate;
+                return $sede_cache;
+            }
+        }
+
+        // 2. Por host (fuente de verdad)
         $host = isset($_SERVER['HTTP_HOST']) ? strtolower(sanitize_text_field($_SERVER['HTTP_HOST'])) : '';
         $host = preg_replace('/^www\./', '', $host);
-        
+
         if (isset($sede_map_cache[$host])) {
             $sede_cache = $sede_map_cache[$host];
             return $sede_cache;
         }
 
-        if (!empty($_COOKIE['sede_codigo'])) {
-            $sede_cache = sanitize_text_field($_COOKIE['sede_codigo']);
-            return $sede_cache;
-        }
-        if (!empty($_COOKIE['wc_sede'])) {
-            $sede_cache = sanitize_text_field($_COOKIE['wc_sede']);
-            return $sede_cache;
+        // 3. Cookies como último recurso — también validadas contra el mapa
+        foreach (array('sede_codigo', 'wc_sede') as $cookie_name) {
+            if (!empty($_COOKIE[$cookie_name])) {
+                $candidate = sanitize_text_field($_COOKIE[$cookie_name]);
+                if (in_array($candidate, $valid_codes, true)) {
+                    $sede_cache = $candidate;
+                    return $sede_cache;
+                }
+            }
         }
 
         $sede_cache = '';
