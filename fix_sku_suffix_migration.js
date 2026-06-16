@@ -14,7 +14,7 @@
 import "dotenv/config";
 import supabase from "./supabaseClient.js";
 
-const UNIT_SUFFIXES = ["UNIDAD", "UNID", "UND", "UN", "KGM", "KG", "GRM", "GR", "LTR", "LT", "ML", "MT", "CM"];
+const UNIT_SUFFIXES = ["UNIDAD", "UNID", "UND", "UN", "KL", "KGM", "KG", "GRM", "GR", "LTR", "LT", "ML", "MT", "CM"];
 
 function stripUnitSuffix(sku) {
   const s = String(sku).trim().toUpperCase();

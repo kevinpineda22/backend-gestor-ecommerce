@@ -5,7 +5,7 @@ import { getLivePriceForItem, getAllPricesForItem } from "./siesa/siesa.prices.j
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
 
 // Sufijos de unidad que WooCommerce podría tener pegados al SKU
-const UNIT_SUFFIXES = ["UNIDAD", "UNID", "UND", "UN", "KGM", "KG", "GRM", "GR", "LTR", "LT", "ML", "MT", "CM"];
+const UNIT_SUFFIXES = ["UNIDAD", "UNID", "UND", "UN", "KL", "KGM", "KG", "GRM", "GR", "LTR", "LT", "ML", "MT", "CM"];
 
 function stripUnitSuffix(sku) {
   const s = String(sku).trim().toUpperCase();
