@@ -257,8 +257,17 @@ async function resolveSingleProduct(client, sedeCode, pd) {
             // Sin variación → verificar si es simple o variable
             if (!variation) {
                 if (productData.type === 'variable') {
-                    // Producto variable sin variación especificada:
-                    // WooCommerce ignora sale_price en el padre → hay que aplicarlo a TODAS las variaciones
+                    // GUARDA ANTI-DERRAME: un value_discount sin variación en un producto VARIABLE
+                    // casi siempre es un SKU mal cargado (sin sufijo P3/UND). Expandirlo a TODAS las
+                    // variaciones derrama el descuento a variaciones no deseadas (bug histórico que
+                    // dejó unidades tachadas de más, incluso a $0). Por defecto FRENAMOS y reportamos.
+                    // Para aplicar a todas las variaciones a propósito, la entrada debe traer
+                    // apply_all_variations:true (opt-in explícito).
+                    if (pd.apply_all_variations !== true) {
+                        return [{ ...pd, ok: false, message: `Producto VARIABLE (${sku}) sin variación especificada — no se aplica para no derramar el descuento a todas las variaciones. Indicá la variación en el SKU (ej: ${sku}P3, ${sku}UND) o enviá apply_all_variations:true para aplicar a todas a propósito.` }];
+                    }
+                    // Opt-in confirmado → aplicar el mismo descuento a TODAS las variaciones
+                    // (WooCommerce ignora sale_price en el padre, por eso se hace por variación).
                     let variations = [];
                     try {
                         const varRes = await client.get(`/products/${productId}/variations`, {
