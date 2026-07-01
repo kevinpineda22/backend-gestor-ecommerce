@@ -4,6 +4,20 @@ import wooApi from "./woo.service.js";
 import { getLivePriceForItem, getAllPricesForItem } from "./siesa/siesa.prices.js";
 import { getLiveStockForItem } from "./siesa/siesa.stock.js";
 
+// Sufijos de unidad que WooCommerce podría tener pegados al SKU
+const UNIT_SUFFIXES = ["UNIDAD", "UNID", "UND", "UN", "KL", "KGM", "KG", "GRM", "GR", "LTR", "LT", "ML", "MT", "CM"];
+
+function stripUnitSuffix(sku) {
+  const s = String(sku).trim().toUpperCase();
+  for (const suf of UNIT_SUFFIXES) {
+    if (s.length > suf.length && s.endsWith(suf)) {
+      const base = s.slice(0, -suf.length);
+      if (base.length > 0) return base;
+    }
+  }
+  return null;
+}
+
 // Caché para mapeo de categorías multi-sede (Evita bloqueos de límite de API)
 const _multiSedeCatCache = {};
 
@@ -1137,6 +1151,26 @@ export async function adoptWooProducts() {
   });
   console.log(`🔗 Productos ya vinculados (active_sedes se preservará): ${linkedMap.size}`);
 
+  // Pre-fetch: IDs de Siesa para matching tolerante a sufijos de unidad
+  console.log("📥 Cargando IDs de Siesa para matching tolerante...");
+  const siesaIds = new Set();
+  {
+    let from = 0;
+    const pageSize = 1000;
+    while (true) {
+      const { data: sData, error: sErr } = await supabase
+        .from("items_siesa")
+        .select("f120_id")
+        .range(from, from + pageSize - 1);
+      if (sErr) { console.error("Error cargando Siesa IDs:", sErr.message); break; }
+      if (!sData || sData.length === 0) break;
+      sData.forEach(r => siesaIds.add(String(r.f120_id).trim().toUpperCase()));
+      if (sData.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  console.log(`📥 ${siesaIds.size} IDs de Siesa cargados`);
+
   let page = 1;
   const perPage = 100;
   let totalProcessed = 0;
@@ -1187,7 +1221,19 @@ export async function adoptWooProducts() {
       syncedWooIds.add(p.id);
 
       const itemKeyUpper = String(itemKey).trim().toUpperCase();
-      const existingData = linkedMap.get(itemKeyUpper);
+      let existingData = linkedMap.get(itemKeyUpper);
+
+      // Si no se encuentra por SKU exacto, probar sin sufijo de unidad
+      // (ej: "177924UND" → buscar "177924" en linkedMap)
+      if (!existingData) {
+        const suffixBase = stripUnitSuffix(itemKeyUpper);
+        if (suffixBase) {
+          existingData = linkedMap.get(suffixBase);
+          if (existingData) {
+            console.log(`🔗 "${p.name}" (SKU="${p.sku}") encontrado por SKU base "${suffixBase}" — omitido (ya gestionado)`);
+          }
+        }
+      }
 
       if (existingData) {
         // 🔒 PROTECCIÓN ESTRICTA DEL GESTOR LOCAL:
@@ -1195,21 +1241,28 @@ export async function adoptWooProducts() {
         // del payload de sincronización. WooCommerce jamás pisará los datos locales 
         // (nombres, imágenes, activaciones de sedes) de los productos ya gestionados.
         continue;
-      } else {
-        // Producto NUEVO (nunca vinculado) o recién adoptado.
-        payload.push({
-          item: String(itemKey),
-          woo_product_id: p.id,
-          woo_status: p.status,
-          ecommerce_active: p.status === "publish",
-          active_sedes: p.status === "publish" ? allSedesActive : allSedesInactive,
-          image_url: p.images?.[0]?.src || null,
-          woo_name: p.name,
-          woo_category_names: catNames,
-          woo_tag_names: tagNames,
-          last_sync: new Date().toISOString()
-        });
       }
+
+      // Producto NUEVO (nunca vinculado)
+      // Si el SKU tiene un sufijo de unidad y el base existe en Siesa, usar el base limpio
+      const suffixBase = stripUnitSuffix(itemKeyUpper);
+      if (suffixBase && siesaIds.has(suffixBase)) {
+        itemKey = suffixBase;
+        console.log(`🔧 SKU "${p.sku}" limpiado a "${suffixBase}" (sufijo de unidad eliminado para nuevo producto)`);
+      }
+
+      payload.push({
+        item: String(itemKey),
+        woo_product_id: p.id,
+        woo_status: p.status,
+        ecommerce_active: p.status === "publish",
+        active_sedes: p.status === "publish" ? allSedesActive : allSedesInactive,
+        image_url: p.images?.[0]?.src || null,
+        woo_name: p.name,
+        woo_category_names: catNames,
+        woo_tag_names: tagNames,
+        last_sync: new Date().toISOString()
+      });
     }
 
     if (missingSkuCount > 0) {
