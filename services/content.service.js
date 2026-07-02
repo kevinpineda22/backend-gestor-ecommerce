@@ -257,17 +257,7 @@ async function resolveSingleProduct(client, sedeCode, pd) {
             // Sin variación → verificar si es simple o variable
             if (!variation) {
                 if (productData.type === 'variable') {
-                    // GUARDA ANTI-DERRAME: un value_discount sin variación en un producto VARIABLE
-                    // casi siempre es un SKU mal cargado (sin sufijo P3/UND). Expandirlo a TODAS las
-                    // variaciones derrama el descuento a variaciones no deseadas (bug histórico que
-                    // dejó unidades tachadas de más, incluso a $0). Por defecto FRENAMOS y reportamos.
-                    // Para aplicar a todas las variaciones a propósito, la entrada debe traer
-                    // apply_all_variations:true (opt-in explícito).
-                    if (pd.apply_all_variations !== true) {
-                        return [{ ...pd, ok: false, message: `Producto VARIABLE (${sku}) sin variación especificada — no se aplica para no derramar el descuento a todas las variaciones. Indicá la variación en el SKU (ej: ${sku}P3, ${sku}UND) o enviá apply_all_variations:true para aplicar a todas a propósito.` }];
-                    }
-                    // Opt-in confirmado → aplicar el mismo descuento a TODAS las variaciones
-                    // (WooCommerce ignora sale_price en el padre, por eso se hace por variación).
+                    // Traemos las variaciones una sola vez para decidir cómo resolver.
                     let variations = [];
                     try {
                         const varRes = await client.get(`/products/${productId}/variations`, {
@@ -280,7 +270,37 @@ async function resolveSingleProduct(client, sedeCode, pd) {
                     if (variations.length === 0) {
                         return [{ ...pd, ok: false, message: `Producto variable (${sku}) sin variaciones en WooCommerce` }];
                     }
-                    // Una entrada por cada variación, mismo discount_amount
+
+                    // CASO CARNES POR PESO: producto con exactamente 2 variaciones, Kg (sufijo
+                    // KL/KG) y Libra (sufijo LB). Regla de negocio: el descuento se aplica al Kg y
+                    // la Libra se fuerza a la MITAD del precio del Kg ya con descuento. Esto permite
+                    // subir el Excel con el SKU base (sin sufijo) sin derramar a ciegas: es una
+                    // expansión explícita y calculada, no el viejo derrame que dejaba unidades a $0.
+                    const skuOf = v => String(v.sku || '').trim().toUpperCase();
+                    const kgVar = variations.find(v => /(KL|KG)$/.test(skuOf(v)));
+                    const lbVar = variations.find(v => /LB$/.test(skuOf(v)));
+                    if (kgVar && lbVar && variations.length === 2) {
+                        const kgReg = Number(kgVar.regular_price) || Number(kgVar.price) || 0;
+                        const lbReg = Number(lbVar.regular_price) || Number(lbVar.price) || 0;
+                        const kgSale = Math.max(0, kgReg - pd.discount_amount);
+                        const lbSale = Math.round(kgSale / 2); // Libra = mitad del Kg con descuento
+                        return [
+                            { ...pd, ok: true, productId, variationId: kgVar.id, regularPrice: kgReg, discount_amount: pd.discount_amount, productType: 'variation', sku: kgVar.sku || pd.sku },
+                            { ...pd, ok: true, productId, variationId: lbVar.id, regularPrice: lbReg, discount_amount: Math.max(0, lbReg - lbSale), productType: 'variation', sku: lbVar.sku || pd.sku },
+                        ];
+                    }
+
+                    // GUARDA ANTI-DERRAME (resto de variables, ej: packs P#): un value_discount sin
+                    // variación casi siempre es un SKU mal cargado (sin sufijo P3/UND). Expandirlo a
+                    // TODAS las variaciones derrama el descuento a variaciones no deseadas (bug
+                    // histórico que dejó unidades tachadas de más, incluso a $0). FRENAMOS y reportamos.
+                    // Para aplicar a todas las variaciones a propósito, la entrada debe traer
+                    // apply_all_variations:true (opt-in explícito).
+                    if (pd.apply_all_variations !== true) {
+                        return [{ ...pd, ok: false, message: `Producto VARIABLE (${sku}) sin variación especificada — no se aplica para no derramar el descuento a todas las variaciones. Indicá la variación en el SKU (ej: ${sku}P3, ${sku}UND) o enviá apply_all_variations:true para aplicar a todas a propósito.` }];
+                    }
+                    // Opt-in confirmado → aplicar el mismo descuento a TODAS las variaciones
+                    // (WooCommerce ignora sale_price en el padre, por eso se hace por variación).
                     return variations.map(v => ({
                         ...pd,
                         ok: true,

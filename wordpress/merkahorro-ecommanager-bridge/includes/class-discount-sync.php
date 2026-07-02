@@ -262,8 +262,15 @@ class Merkahorro_Bridge_Discount_Sync {
         }
 
         foreach ($rules as $rule) {
+            // value_discount se aplica vía sale_price directo en WooCommerce (no FlyCart).
+            // Nunca debe generar una regla en wdr_rules: la crearía como "descuento fijo $0"
+            // porque su monto vive por producto, no en discount_value. Si alguna quedó
+            // sincronizada de antes, al no procesarla acá el cleanup de abajo la elimina.
+            if (($rule['discount_type'] ?? '') === 'value_discount') {
+                continue;
+            }
             $rule['title'] = $prefix . ($rule['title'] ?? 'Descuento');
-            
+
             $wdr_data = merkahorro_build_wdr_rule($rule, $separata_product_ids);
             if (!$wdr_data) {
                 $errors[] = 'Error construyendo regla: ' . ($rule['title'] ?? '?');
