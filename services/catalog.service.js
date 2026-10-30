@@ -723,7 +723,11 @@ export async function updateProductInWoo(wooId, data) {
 
     // Payload para sedes no-PV001: extraer URLs de las imágenes originales (no IDs de PV001)
     const payloadOtherSedes = { ...payload };
-    if (data.images && Array.isArray(data.images) && data.images.length > 0) {
+    if (Array.isArray(data.images) && data.images.length === 0) {
+      // Galería vaciada explícitamente: limpiar también en las demás sedes,
+      // si no PV001 queda sin imagen y el resto con la vieja
+      payloadOtherSedes.images = [];
+    } else if (data.images && Array.isArray(data.images) && data.images.length > 0) {
       const otherSedeImages = data.images
         .filter(img => img)
         .map(img => {
@@ -790,6 +794,9 @@ export async function updateProductInWoo(wooId, data) {
   if (data.images && data.images.length > 0) {
     const first = data.images[0];
     updateLocal.image_url = typeof first === 'string' ? first : (first?.src || "");
+  } else if (Array.isArray(data.images)) {
+    // Galería vaciada: no dejar la URL vieja en el espejo local (el gestor seguiría mostrándola)
+    updateLocal.image_url = null;
   } else if (data.image_url) updateLocal.image_url = data.image_url;
   if (data.name) updateLocal.woo_name = data.name; 
   
